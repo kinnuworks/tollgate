@@ -59,6 +59,9 @@ export function checkTransaction(kind, b64, me, signedUnits, pda = PROVIDERS.hai
       if (u64(x.data, 1) > BigInt(signedUnits)) throw new Error('refused: settle asks for more than this client signed');
       notes.push(`settle ${u64(x.data, 1)} units (signed ${signedUnits})`);
     } else if (x.program === TOKEN && x.data[0] === 5) notes.push('revoke');
+    else if (x.program === TOKEN && (x.data[0] === 7 || x.data[0] === 12)) { /* funding this wallet */ }
+    else if (x.program === TOKEN) throw new Error(`refused: unexpected token instruction ${x.data[0]}`);
+    else if (!['ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', 'Ed25519SigVerify111111111111111111111111111', 'ComputeBudget111111111111111111111111111111'].includes(x.program)) throw new Error(`refused: unknown program ${x.program}`);
   }
   if (kind === 'open' && !notes.some(n => n.startsWith('approve'))) throw new Error('refused: no approval in the open transaction');
   return notes;
