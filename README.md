@@ -8,6 +8,8 @@ Why Solana: paying a fraction of a cent per answer only works if settling costs 
 
 ## Try it in 30 seconds
 
+Open the link and press **Run the 60-second demo**. It does the steps below on its own, with an explorer link for each one. To do it by hand:
+
 1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.25 of test USDC, and the AI provider is approved on-chain to take at most that.
 2. Click **Ask**. The answer streams in while the tab signs a payment voucher every 50 tokens. The meter shows what you've paid so far.
 3. Untick **Keep paying** while it's answering. The text stops with "Waiting for payment…". Tick it again and it carries on.
