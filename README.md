@@ -17,7 +17,7 @@ Open the link and press **Run the 20-second demo**. It does the steps below on i
 1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.50 of test USDC and approves the Tollgate program to spend at most $0.25 of it.
 2. Click **Ask**. The answer streams in while the tab signs a payment voucher every 50 tokens. The meter shows what you've paid so far.
 3. Untick **Keep paying** while it's answering. The text stops with "Waiting for payment…". Tick it again and it carries on.
-4. Click **Provider tries $0.30**. The Tollgate program refuses it on-chain (error 1: above your signed voucher), and you get the failed transaction's link.
+4. Click **Provider tries $0.30**. Your tab co-signs a $0.30 settle, and the Tollgate program still refuses it on-chain (error 1: above your signed voucher). You get the failed transaction's link.
 5. Click **Settle**. One transaction checks your voucher on-chain, pays the provider exactly the signed amount and revokes the approval. The rest never left your wallet. You get explorer links for every step.
 
 ## How it works
@@ -36,7 +36,7 @@ signs voucher (amount, expiry) ───► checks the signature, releases
 ```
 
 - **Vouchers.** Each voucher is the 50-byte format the Solana Foundation's payment channels use (`0x56 0x01 · channel id · cumulative amount u64 · expiry i64`). The tab signs it with its own ed25519 key. The gateway won't stream past what the latest voucher covers.
-- **Tollgate program** ([`program/src/lib.rs`](program/src/lib.rs), devnet [`58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj`](https://explorer.solana.com/address/58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj?cluster=devnet)). A 20 KB Pinocchio program with one instruction, `settle`. It reads the instructions sysvar, finds the Ed25519 check of a voucher signed by this payer for this payer's channel, and pays the provider at most the signed amount from the payer's token account, signing as its PDA. It refuses a different payer, a different provider, a missing voucher, or an amount above the voucher (error 1).
+- **Tollgate program** ([`program/src/lib.rs`](program/src/lib.rs), devnet [`58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj`](https://explorer.solana.com/address/58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj?cluster=devnet)). A 20 KB Pinocchio program with one instruction, `settle`. It reads the instructions sysvar, finds the Ed25519 check of a voucher signed by this payer for this payer's channel, and pays the provider at most the signed amount from the payer's token account, signing as its PDA. It refuses a settle the payer didn't sign (error 6, so nobody holding a voucher can replay it), a different payer, a different provider, a missing voucher, or an amount above the voucher (error 1). It does not check the voucher's expiry or keep a record of past payouts; the payer's signature on each settle and the revoke in the same transaction cover that for this demo.
 - **On-chain cap.** At open, the tab's wallet approves the program's PDA (not the provider) as a token delegate for $0.25, so the total can never pass that either.
 - **Settle.** One transaction: Ed25519 verify, `tollgate.settle`, and the tab's revoke.
 - **Price.** $2 per million tokens (2 base units of 6-decimal USDC per token), paid in 50-token blocks.

@@ -37,6 +37,6 @@ for (;;) {
   }
 }
 console.log('answer start:', JSON.stringify(text.slice(0, 120)));
-console.log('overcharge', await post('/api/overcharge', { id: s.id }));
+const po = await post('/api/overcharge', { id: s.id }); console.log('overcharge', await post('/api/overcharge', { id: s.id, signature: sign(po.message) }));
 const p = await post('/api/settle', { id: s.id }); const st = await post('/api/settle', { id: s.id, signature: sign(p.message) });
 console.log('settle', st.settled, 'vouchers', vouchers);

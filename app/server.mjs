@@ -14,7 +14,7 @@ import bs58 from 'bs58';
 import Anthropic from '@anthropic-ai/sdk';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { encodeVoucherMessageBytes } from '@solana/mpp/server';
-import { prepareOpen, prepareSettle, submitWithPayerSignature, tryOvercharge, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
+import { prepareOpen, prepareSettle, submitWithPayerSignature, prepareOvercharge, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.MODEL || 'claude-haiku-5-5';
@@ -143,7 +143,17 @@ app.post('/api/open/confirm', async (req, res) => {
 app.post('/api/overcharge', async (req, res) => {
   const s = sessions.get(req.body.id);
   if (!s) return res.status(404).json({ error: 'no session' });
-  try { res.json(await tryOvercharge(s.payerAddress, s.vouchers.at(-1))); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  try {
+    if (!req.body.signature) {
+      const { tx, message } = await prepareOvercharge(s.payerAddress, s.vouchers.at(-1));
+      s.pendingOver = tx;
+      return res.json({ message, amount: (DEPOSIT + 50_000n).toString(), signedFor: s.paidAmount.toString() });
+    }
+    try {
+      const r = await submitWithPayerSignature(s.pendingOver, s.payerAddress, bs58.decode(req.body.signature), { skipPreflight: true });
+      res.json({ failed: false, sig: r.sig });
+    } catch (e) { res.json({ failed: true, sig: e.sig, error: e.chainErr || String(e.message || e) }); }
+  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 
 app.post('/api/settle', async (req, res) => {

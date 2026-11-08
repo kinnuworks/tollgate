@@ -190,7 +190,7 @@
     <div class="faq">
       <details><summary>Is this real money?</summary><p>No. Everything runs on Solana devnet with a test USDC token this project minted (6 decimals). The transactions are real devnet transactions, and every one is linked.</p></details>
       <details><summary>Who holds the wallet's key?</summary><p>Your browser tab. It generates the key, signs the approval, the vouchers and the revoke, and never sends the key anywhere. The server adds only the fee-payer signature and mints test USDC into the wallet.</p></details>
-      <details><summary>What stops the provider from charging more than I signed for?</summary><p>The Tollgate program. Your tab approves it, not the provider, as the spender. At settle it reads your voucher from Solana's Ed25519 signature check in the same transaction and pays at most the signed amount; anything more fails with error 1. The approval also caps the total at $0.25. The voucher format is the one the Solana Foundation's payment channels use.</p></details>
+      <details><summary>What stops the provider from charging more than I signed for?</summary><p>The Tollgate program. Your tab approves it, not the provider, as the spender. At settle it needs your tab's signature, reads your voucher from Solana's Ed25519 signature check in the same transaction, and pays at most the signed amount. Anything more fails with error 1, even when your tab co-signs it, and a settle your tab didn't sign fails with error 6. The approval also caps the total at $0.25. The voucher format is the one the Solana Foundation's payment channels use.</p></details>
       <details><summary>What does the AI do?</summary><p>It answers your question. Anthropic's Claude Haiku model streams the text, the gateway meters it at about 4 characters per token, and the model's own token count appears under the answer when it finishes. You pay in 50-token blocks at $2 per million tokens.</p></details>
       <details><summary>Can I run it myself?</summary><p>Yes. The code is on GitHub with setup steps in the README: a Node server, a devnet mint you control, and an Anthropic API key.</p></details>
     </div>
@@ -287,8 +287,9 @@ $('ask').addEventListener('submit', e => {
 $('over').addEventListener('click', async () => {
   $('over').disabled = true; $('result').innerHTML = '<span class="t-small">Provider is trying to pull $0.30…</span>';
   try {
-    const r = await post('/api/overcharge', { id: S.id });
-    $('result').innerHTML = r.failed ? '<span class="ok">Refused on-chain by the Tollgate program (error 1: above your signed voucher). You signed for less, so the provider gets nothing extra.</span>' : '<span class="bad">Unexpected: the transfer went through.</span>';
+    const p = await post('/api/overcharge', { id: S.id });
+    const r = await post('/api/overcharge', { id: S.id, signature: signMessage(p.message) });
+    $('result').innerHTML = r.failed ? '<span class="ok">Refused on-chain by the Tollgate program (error 1: above your signed voucher). Your tab even co-signed the $0.30 settle, and the program still paid nothing.</span>' : '<span class="bad">Unexpected: the transfer went through.</span>';
     if (r.sig) $('links').insertAdjacentHTML('beforeend', ex(r.sig, 'Refused overcharge: Tollgate program error 1 ↗', 'bad'));
   } catch (e) { $('result').innerHTML = `<span class="bad">${e.message}</span>`; }
   $('over').disabled = false;

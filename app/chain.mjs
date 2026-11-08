@@ -98,11 +98,11 @@ async function prepare(ixs) {
   return { tx, message: getBase64Decoder().decode(tx.messageBytes) };
 }
 
-export async function submitWithPayerSignature(tx, payerAddress, signatureBytes) {
+export async function submitWithPayerSignature(tx, payerAddress, signatureBytes, { skipPreflight = false } = {}) {
   const signed = { ...tx, signatures: { ...tx.signatures, [payerAddress]: signatureBytes } };
   const sig = getSignatureFromTransaction(signed);
-  await retry(() => rpc.sendTransaction(getBase64EncodedWireTransaction(signed), { encoding: 'base64', preflightCommitment: 'confirmed' }).send());
-  return { sig, ms: await timed(() => confirm(sig)) };
+  await retry(() => rpc.sendTransaction(getBase64EncodedWireTransaction(signed), { encoding: 'base64', skipPreflight, preflightCommitment: 'confirmed' }).send());
+  try { return { sig, ms: await timed(() => confirm(sig)) }; } catch (e) { e.sig = sig; throw e; }
 }
 
 export const PROGRAM_ID = address(process.env.PROGRAM_ID || '58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj');
@@ -137,10 +137,11 @@ function ed25519Ix(pubkeyB58, sigB58, message) {
   return { programAddress: ED25519_PROGRAM, accounts: [], data };
 }
 
-async function settleIxs(payerAddress, amount, voucher) {
+async function settleIxs(ownerSigner, amount, voucher) {
   const [pda, bump] = await pdaP;
   const { ix, payeeAta } = await ensurePayeeAta();
-  const owner = address(payerAddress);
+  const owner = ownerSigner.address;
+  const payerAddress = owner;
   const data = new Uint8Array(11); const dv = new DataView(data.buffer);
   data[0] = 1; dv.setBigUint64(1, BigInt(amount), true); data[9] = DECIMALS; data[10] = bump;
   return [ix,
@@ -150,7 +151,7 @@ async function settleIxs(payerAddress, amount, voucher) {
       { address: MINT, role: AccountRole.READONLY },
       { address: payeeAta, role: AccountRole.WRITABLE },
       { address: pda, role: AccountRole.READONLY },
-      { address: owner, role: AccountRole.READONLY },
+      { address: owner, role: AccountRole.READONLY_SIGNER, signer: ownerSigner },
       { address: INSTRUCTIONS_SYSVAR, role: AccountRole.READONLY },
       { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ] }];
@@ -159,7 +160,7 @@ async function settleIxs(payerAddress, amount, voucher) {
 // Settle: Tollgate checks the voucher on-chain and pays at most the signed amount; the tab signs the revoke.
 export async function prepareSettle(payerAddress, amount, voucher) {
   const owner = createNoopSigner(address(payerAddress));
-  const ixs = amount > 0n && voucher ? await settleIxs(payerAddress, amount, voucher) : [];
+  const ixs = amount > 0n && voucher ? await settleIxs(owner, amount, voucher) : [];
   ixs.push(getRevokeInstruction({ source: await ata(owner.address), owner }));
   return prepare(ixs);
 }
@@ -170,17 +171,12 @@ async function ensurePayeeAta() {
   return { ix: await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: payee.address, mint: MINT }), payeeAta: await ata(payee.address) };
 }
 
-// The provider asks the Tollgate program for $0.30 against the tab's latest voucher. The program refuses.
-export async function tryOvercharge(payerAddress, voucher) {
-  const operator = await operatorP;
-  const amount = DEPOSIT + 50_000n;
+// A settle for $0.30 against the tab's latest voucher. The tab co-signs it (as it
+// would sign anything the server sends), and the Tollgate program still refuses.
+export async function prepareOvercharge(payerAddress, voucher) {
+  const owner = createNoopSigner(address(payerAddress));
   const v = voucher || { amount: '0', expiresAt: 0, signature: '1111111111111111111111111111111111111111111111111111111111111111' };
-  try {
-    const r = await send(operator, await settleIxs(payerAddress, amount, v), { skipPreflight: true });
-    return { sig: r.sig, failed: false, amount: amount.toString() };
-  } catch (e) {
-    return { failed: true, error: e.chainErr || e.message, amount: amount.toString(), sig: e.sig };
-  }
+  return prepare(await settleIxs(owner, DEPOSIT + 50_000n, v));
 }
 
 // Public proof of use: successful payouts into the provider's token account.

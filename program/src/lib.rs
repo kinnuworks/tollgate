@@ -5,6 +5,8 @@
 //! provider at most the signed amount from the payer's token account. The
 //! payer approves this program's PDA as a token delegate when the session
 //! opens, so the chain (not the server) decides how much the provider gets.
+//! The payer must also sign the settle transaction, so a voucher cannot be
+//! replayed by the server or anyone else who has seen it.
 //!
 //! Voucher bytes (Solana Foundation payment-channel layout, 50 bytes):
 //!   0x56 0x01 | channel id (32) = payer's key | amount u64 LE | expires_at i64 LE
@@ -39,6 +41,8 @@ enum TollgateError {
     WrongProvider = 4,
     /// Malformed instruction data or accounts.
     BadInput = 5,
+    /// The payer did not sign this settle, so nobody else can replay a voucher.
+    PayerMustSign = 6,
 }
 
 fn err(e: TollgateError) -> ProgramError {
@@ -62,6 +66,11 @@ pub fn process_instruction(_program_id: &Address, accounts: &mut [AccountView], 
         return Err(err(TollgateError::BadInput));
     }
     let owner_key: [u8; 32] = owner.address().as_ref().try_into().unwrap();
+    // Each payout needs the payer's own signature on this transaction, so a
+    // voucher can't be settled again by whoever holds it.
+    if !owner.is_signer() {
+        return Err(err(TollgateError::PayerMustSign));
+    }
 
     // The payer's token account must belong to the voucher signer, and the
     // receiving account must belong to this deployment's provider.
