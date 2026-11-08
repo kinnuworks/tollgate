@@ -20,6 +20,26 @@ Open the link and press **Run the 20-second demo**. It does the steps below on i
 4. Click **Provider tries $0.30**. Your tab co-signs a $0.30 settle, and the Tollgate program still refuses it on-chain (error 1: above your signed voucher). You get the failed transaction's link.
 5. Click **Settle**. One transaction checks your voucher on-chain, pays the provider exactly the signed amount and revokes the approval. The rest never left your wallet. You get explorer links for every step.
 
+## Pay from your own agent (SDK)
+
+[`sdk/tollgate.mjs`](sdk/tollgate.mjs) lets any program or AI agent buy an answer per token with its own Solana key. The key never leaves the agent: it signs the approval, one voucher per 50 tokens, and the revoke. Every transaction the provider builds is decoded and checked before it is signed.
+
+```js
+import { TollgateClient } from './sdk/tollgate.mjs';
+const tg = new TollgateClient('https://tollgate-production-6271.up.railway.app');
+await tg.open('haiku');                                   // or 'sonnet'
+const { text } = await tg.ask('List three uses of payment channels.', {
+  shouldPay: (soFar, nextUnits) => nextUnits <= 5_000n,   // the agent's own budget rule
+});
+const receipt = await tg.settle();                        // { paid, sig, ms, explorer }
+```
+
+`node sdk/agent-example.mjs` runs this against the live site. A recent run paid 300 units and settled in 836 ms ([transaction](https://explorer.solana.com/tx/3joF7XUhNYkr4DVxSpvMUd2fJmk84Fx9aEceviJY5CPs2P2pp9FCdcroapzRzofPizzc3aN6uh7kY8cReHgrtDZh?cluster=devnet)).
+
+## Any provider can sell through Tollgate
+
+The program has no built-in provider. Each provider gets its own delegate PDA, derived from its wallet (`["tollgate", provider wallet]`), so a payer's approval can only ever pay the provider it chose. The live site has two: Claude Haiku at $2 per million tokens and Claude Sonnet at $6 per million, each paid to its own wallet.
+
 ## Agent mode
 
 Press **Let an AI agent buy an answer**. The tab's wallet now belongs to a buying agent with a task ("learn what a payment channel is; one clear sentence is enough"). Before signing each next voucher, the agent (Claude Haiku) reads the answer so far and decides whether it already has what the task needs. When it does, it stops paying, the stream halts, and it settles on its own. In our test run it bought 50 tokens of a roughly 400-token answer and paid $0.000100. The page shows each of the agent's decisions and its reason.
@@ -53,7 +73,7 @@ signs voucher (amount, expiry) ───► checks the signature, releases
 - The token count during streaming is an estimate (about 4 characters per token). The model's own count is shown under the answer when it ends.
 - The gateway decides when to stop streaming; the chain decides how much can be paid. The settle amount is checked on-chain against the signed voucher.
 - We first tried the Solana Foundation's payment-channels program on devnet and opened a channel on it ([open transaction](https://explorer.solana.com/tx/5NtC5ZKkgZqm4gMSPJFh9cGHACmUeKDLKiKuW2NJ1qaReur1KZ3EDREZktxcV1MGcz6KNx2AmGS39nsr3QSrzhgx?cluster=devnet)). Its payout step failed on devnet's treasury account check (`TreasuryAccountMismatch`), so we wrote the small settle program above instead, keeping the same voucher format.
-- One provider (this project) and one model (Anthropic's Claude Haiku).
+- Two providers, both run by this project for the demo (Claude Haiku and Claude Sonnet, separate wallets).
 
 ## Tests
 

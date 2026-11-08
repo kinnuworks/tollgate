@@ -14,3 +14,4 @@ app/.env
 *.log
 SUBMISSION.md
 VIDEO.md
+sdk/node_modules
