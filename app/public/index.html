@@ -38,6 +38,12 @@
   .actions{display:flex;gap:8px;flex-wrap:wrap}
   .actions .btn{--h:40px;flex:1;padding:0 14px;font-size:14px}
   .btn:disabled{opacity:.45;cursor:default;transform:none}
+  .hero--color .window .btn-outline{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
+  .hero--color .window .btn-outline:hover{background:var(--surface-2)}
+  .hero--color .window{color:var(--ink)}
+  .nav.nav--on-color .nav__bar{background:color-mix(in oklab,var(--surface) 80%,transparent);color:var(--ink);box-shadow:0 0 0 1px var(--line),0 10px 30px -14px rgba(var(--shadow-rgb)/.22)}
+  .nav.nav--on-color .nav__links a{color:var(--ink-2)}
+  .nav.nav--on-color .btn-ink{background:var(--ink);color:var(--bg)}
   #result{font-size:14px;color:var(--ink-2)}
   #result .ok{color:#1F7A3D;font-weight:550}
   #result .bad{color:#B42318}
