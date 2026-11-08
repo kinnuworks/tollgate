@@ -11,7 +11,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash, appendTransactionMessageInstructions,
   signTransactionMessageWithSigners, getBase64EncodedWireTransaction, getSignatureFromTransaction,
   createNoopSigner, partiallySignTransactionMessageWithSigners, getBase64Decoder,
-  getProgramDerivedAddress, AccountRole, getBase58Encoder,
+  getProgramDerivedAddress, AccountRole, getBase58Encoder, getAddressEncoder,
 } from '@solana/kit';
 import { encodeVoucherMessageBytes } from '@solana/mpp/server';
 import {
@@ -122,13 +122,22 @@ export async function submitWithPayerSignature(tx, payerAddress, signatureBytes,
 export const PROGRAM_ID = address(process.env.PROGRAM_ID || '58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj');
 const ED25519_PROGRAM = address('Ed25519SigVerify111111111111111111111111111');
 const INSTRUCTIONS_SYSVAR = address('Sysvar1nstructions1111111111111111111111111');
-const pdaP = getProgramDerivedAddress({ programAddress: PROGRAM_ID, seeds: ['tollgate'] });
+// Providers selling through Tollgate. Each has its own delegate PDA, derived from its wallet.
+export const PROVIDERS = {
+  haiku: { id: 'haiku', name: 'Claude Haiku', model: 'claude-haiku-5-5', unitsPerToken: 2n, wallet: address(process.env.PROVIDER_HAIKU || 'HBKvsWpsZHdqrwstePVRiKttFjoW3AEaEYNvCezMaFtp') },
+  sonnet: { id: 'sonnet', name: 'Claude Sonnet', model: 'claude-sonnet-5-5', unitsPerToken: 6n, wallet: address(process.env.PROVIDER_SONNET || 'CKr6qxg1kFwPNDprnqwYH6Dibk4CTvqSqG1zU2eBofeY') },
+};
+const pdaCache = new Map();
+export async function pdaFor(wallet) {
+  if (!pdaCache.has(wallet)) pdaCache.set(wallet, await getProgramDerivedAddress({ programAddress: PROGRAM_ID, seeds: ['tollgate', getAddressEncoder().encode(wallet)] }));
+  return pdaCache.get(wallet);
+}
 const b58 = getBase58Encoder();
 
 // The tab approves the Tollgate program's PDA (not the provider) to spend at most the cap.
-export async function prepareOpen(payerAddress, mint = MINT) {
+export async function prepareOpen(payerAddress, mint = MINT, provider = PROVIDERS.haiku.wallet) {
   const operator = await operatorP;
-  const [pda] = await pdaP;
+  const [pda] = await pdaFor(provider);
   const owner = createNoopSigner(address(payerAddress));
   const payerAta = await ata(owner.address, mint);
   const fund = mint === USDC_MINT
@@ -154,9 +163,9 @@ function ed25519Ix(pubkeyB58, sigB58, message) {
   return { programAddress: ED25519_PROGRAM, accounts: [], data };
 }
 
-async function settleIxs(ownerSigner, amount, voucher, mint = MINT) {
-  const [pda, bump] = await pdaP;
-  const { ix, payeeAta } = await ensurePayeeAta(mint);
+async function settleIxs(ownerSigner, amount, voucher, mint = MINT, provider = PROVIDERS.haiku.wallet) {
+  const [pda, bump] = await pdaFor(provider);
+  const { ix, payeeAta } = await ensurePayeeAta(mint, provider);
   const owner = ownerSigner.address;
   const payerAddress = owner;
   const data = new Uint8Array(11); const dv = new DataView(data.buffer);
@@ -171,29 +180,29 @@ async function settleIxs(ownerSigner, amount, voucher, mint = MINT) {
       { address: owner, role: AccountRole.READONLY_SIGNER, signer: ownerSigner },
       { address: INSTRUCTIONS_SYSVAR, role: AccountRole.READONLY },
       { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: provider, role: AccountRole.READONLY },
     ] }];
 }
 
 // Settle: Tollgate checks the voucher on-chain and pays at most the signed amount; the tab signs the revoke.
-export async function prepareSettle(payerAddress, amount, voucher, mint = MINT) {
+export async function prepareSettle(payerAddress, amount, voucher, mint = MINT, provider = PROVIDERS.haiku.wallet) {
   const owner = createNoopSigner(address(payerAddress));
-  const ixs = amount > 0n && voucher ? await settleIxs(owner, amount, voucher, mint) : [];
+  const ixs = amount > 0n && voucher ? await settleIxs(owner, amount, voucher, mint, provider) : [];
   ixs.push(getRevokeInstruction({ source: await ata(owner.address, mint), owner }));
   return prepare(ixs);
 }
 
-async function ensurePayeeAta(mint = MINT) {
+async function ensurePayeeAta(mint = MINT, provider = PROVIDERS.haiku.wallet) {
   const operator = await operatorP;
-  const payee = await payeeP;
-  return { ix: await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: payee.address, mint }), payeeAta: await ata(payee.address, mint) };
+  return { ix: await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: provider, mint }), payeeAta: await ata(provider, mint) };
 }
 
 // A settle for $0.30 against the tab's latest voucher. The tab co-signs it (as it
 // would sign anything the server sends), and the Tollgate program still refuses.
-export async function prepareOvercharge(payerAddress, voucher, mint = MINT) {
+export async function prepareOvercharge(payerAddress, voucher, mint = MINT, provider = PROVIDERS.haiku.wallet) {
   const owner = createNoopSigner(address(payerAddress));
   const v = voucher || { amount: '0', expiresAt: 0, signature: '1111111111111111111111111111111111111111111111111111111111111111' };
-  return prepare(await settleIxs(owner, DEPOSIT + 50_000n, v, mint));
+  return prepare(await settleIxs(owner, DEPOSIT + 50_000n, v, mint, provider));
 }
 
 // Public proof of use: successful payouts into the provider's token account.
@@ -202,8 +211,8 @@ export async function stats() {
   if (statsCache.value && Date.now() - statsCache.at < 20_000) return statsCache.value;
   const payee = await payeeP;
   let ok = 0, failed = 0;
-  for (const mint of [TEST_MINT, USDC_MINT]) {
-    const acct = await ata(payee.address, mint);
+  for (const p of Object.values(PROVIDERS)) for (const mint of [TEST_MINT, USDC_MINT]) {
+    const acct = await ata(p.wallet, mint);
     const sigs = await retry(() => rpc.getSignaturesForAddress(acct, { limit: 1000 }).send()).catch(() => []);
     ok += sigs.filter(x => !x.err).length; failed += sigs.filter(x => x.err).length;
   }

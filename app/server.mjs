@@ -14,7 +14,7 @@ import bs58 from 'bs58';
 import Anthropic from '@anthropic-ai/sdk';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { encodeVoucherMessageBytes } from '@solana/mpp/server';
-import { prepareOpen, prepareSettle, submitWithPayerSignature, prepareOvercharge, pickMint, USDC_MINT, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
+import { prepareOpen, prepareSettle, submitWithPayerSignature, prepareOvercharge, pickMint, USDC_MINT, PROVIDERS, pdaFor, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.MODEL || 'claude-haiku-5-5';
@@ -29,7 +29,7 @@ app.use(express.json());
 app.use(express.static(new URL('./public', import.meta.url).pathname));
 
 const pub = s => ({
-  id: s.id, payer: s.payerAddress, payee: s.payee, mint: s.mint, realUsdc: s.mint === USDC_MINT, deposit: DEPOSIT.toString(), funding: FUNDING.toString(),
+  id: s.id, payer: s.payerAddress, payee: s.prov?.wallet, provider: s.prov?.id, unitsPerToken: Number(s.prov?.unitsPerToken || 2n), mint: s.mint, realUsdc: s.mint === USDC_MINT, deposit: DEPOSIT.toString(), funding: FUNDING.toString(),
   paidAmount: s.paidAmount.toString(), paidTokens: s.paidTokens, tokens: s.tokens, vouchers: s.vouchers.length,
   openSig: s.openSig, settled: s.settled || null,
 });
@@ -40,8 +40,9 @@ app.post('/api/open', async (req, res) => {
     if (bs58.decode(sessionKey).length !== 32) throw new Error('bad session key');
     const id = crypto.randomUUID();
     const mint = await pickMint();
-    const { tx, message } = await prepareOpen(sessionKey, mint);
-    const s = { id, sessionKey, mint, payerAddress: sessionKey, payee: null, paidAmount: 0n, paidTokens: 0, tokens: 0, vouchers: [], waiters: [], history: [], pending: tx };
+    const prov = PROVIDERS[req.body.provider] || PROVIDERS.haiku;
+    const { tx, message } = await prepareOpen(sessionKey, mint, prov.wallet);
+    const s = { id, sessionKey, mint, prov, payerAddress: sessionKey, payee: null, paidAmount: 0n, paidTokens: 0, tokens: 0, vouchers: [], waiters: [], history: [], pending: tx };
     sessions.set(id, s);
     res.json({ id, message });
   } catch (e) {
@@ -63,7 +64,7 @@ app.post('/api/voucher', (req, res) => {
   if (amount <= s.paidAmount) return res.status(400).json({ error: 'voucher total must go up' });
   if (amount > DEPOSIT) return res.status(400).json({ error: 'voucher is above the deposit' });
   s.paidAmount = amount;
-  s.paidTokens = Number(amount / UNITS_PER_TOKEN);
+  s.paidTokens = Number(amount / s.prov.unitsPerToken);
   s.vouchers.push({ amount: amount.toString(), expiresAt, signature: req.body.signature, at: Date.now() });
   s.waiters.splice(0).forEach(w => w());
   res.json({ ok: true, paidTokens: s.paidTokens });
@@ -84,7 +85,7 @@ app.get('/api/chat', async (req, res) => {
   s.history.push({ role: 'user', content: String(req.query.q || '').slice(0, 2000) });
   (async () => {
     try {
-      const stream = ai.messages.stream({ model: MODEL, max_tokens: 1200, thinking: { type: 'disabled' }, messages: s.history,
+      const stream = ai.messages.stream({ model: s.prov.model, max_tokens: 1200, thinking: { type: 'disabled' }, messages: s.history,
         system: 'Answer clearly and helpfully in plain prose. No markdown headings.' });
       stream.on('text', t => { buffer += t; });
       const final = await stream.finalMessage();
@@ -114,7 +115,7 @@ app.get('/api/chat', async (req, res) => {
       const need = s.paidTokens + BLOCK;
       if (need !== lastAsk) {
         lastAsk = need;
-        send('pay', { cumulativeTokens: need, cumulativeAmount: (BigInt(need) * UNITS_PER_TOKEN).toString() });
+        send('pay', { cumulativeTokens: need, cumulativeAmount: (BigInt(need) * s.prov.unitsPerToken).toString() });
       }
       await new Promise(r => { s.waiters.push(r); setTimeout(r, 1500); });
       continue;
@@ -168,7 +169,7 @@ app.post('/api/overcharge', async (req, res) => {
   if (!s) return res.status(404).json({ error: 'no session' });
   try {
     if (!req.body.signature) {
-      const { tx, message } = await prepareOvercharge(s.payerAddress, s.vouchers.at(-1), s.mint);
+      const { tx, message } = await prepareOvercharge(s.payerAddress, s.vouchers.at(-1), s.mint, s.prov.wallet);
       s.pendingOver = tx;
       return res.json({ message, amount: (DEPOSIT + 50_000n).toString(), signedFor: s.paidAmount.toString() });
     }
@@ -185,7 +186,7 @@ app.post('/api/settle', async (req, res) => {
   if (s.settled) return res.json(pub(s));
   try {
     if (!req.body.signature) {
-      const { tx, message } = await prepareSettle(s.payerAddress, s.paidAmount, s.vouchers.at(-1), s.mint);
+      const { tx, message } = await prepareSettle(s.payerAddress, s.paidAmount, s.vouchers.at(-1), s.mint, s.prov.wallet);
       s.pendingSettle = tx;
       return res.json({ message, amount: s.paidAmount.toString() });
     }
@@ -200,6 +201,11 @@ app.post('/api/settle', async (req, res) => {
 
 app.get('/api/stats', async (_, res) => {
   try { res.json(await stats()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+app.get('/api/providers', async (_, res) => {
+  const list = [];
+  for (const p of Object.values(PROVIDERS)) list.push({ id: p.id, name: p.name, model: p.model, usdPerMillion: Number(p.unitsPerToken), wallet: p.wallet, pda: (await pdaFor(p.wallet))[0] });
+  res.json(list);
 });
 app.get('/api/health', (_, res) => res.json({ ok: true, model: MODEL, hasKey: !!process.env.ANTHROPIC_API_KEY }));
 app.listen(PORT, () => console.log(`tollgate on :${PORT}`));

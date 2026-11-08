@@ -5,6 +5,8 @@
 //! provider at most the signed amount from the payer's token account. The
 //! payer approves this program's PDA as a token delegate when the session
 //! opens, so the chain (not the server) decides how much the provider gets.
+//! Any provider can sell through it: the delegate PDA is derived from the
+//! provider's wallet, so a payer's approval only ever pays the provider it chose.
 //! The payer must also sign the settle transaction, so a voucher cannot be
 //! replayed by the server or anyone else who has seen it.
 //!
@@ -23,8 +25,6 @@ use pinocchio_token::instructions::TransferChecked;
 
 entrypoint!(process_instruction);
 
-/// The provider this deployment pays. Settling to any other account is refused.
-const PAYEE: [u8; 32] = decode_b58(b"HBKvsWpsZHdqrwstePVRiKttFjoW3AEaEYNvCezMaFtp");
 const INSTRUCTIONS_SYSVAR: [u8; 32] = decode_b58(b"Sysvar1nstructions1111111111111111111111111");
 const ED25519_PROGRAM: [u8; 32] = decode_b58(b"Ed25519SigVerify111111111111111111111111111");
 const PDA_SEED: &[u8] = b"tollgate";
@@ -61,7 +61,9 @@ pub fn process_instruction(_program_id: &Address, accounts: &mut [AccountView], 
     let decimals = data[9];
     let bump = data[10];
 
-    let [payer_ata, mint, payee_ata, authority, owner, ix_sysvar, _token_program, ..] = accounts else {
+    // accounts: payer token account, mint, provider token account, the provider's Tollgate PDA (the
+    // payer's approved delegate), payer (signer), instructions sysvar, token program, provider wallet.
+    let [payer_ata, mint, payee_ata, authority, owner, ix_sysvar, _token_program, provider, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
@@ -83,7 +85,7 @@ pub fn process_instruction(_program_id: &Address, accounts: &mut [AccountView], 
             return Err(err(TollgateError::WrongPayer));
         }
         let to = payee_ata.try_borrow()?;
-        if to.len() < 64 || to[32..64] != PAYEE {
+        if to.len() < 64 || to[32..64] != *provider.address().as_ref() {
             return Err(err(TollgateError::WrongProvider));
         }
     }
@@ -103,7 +105,8 @@ pub fn process_instruction(_program_id: &Address, accounts: &mut [AccountView], 
     }
 
     let bump_ref = [bump];
-    let seeds = [Seed::from(PDA_SEED), Seed::from(&bump_ref)];
+    // Each provider has its own delegate PDA, so an approval for one provider can never pay another.
+    let seeds = [Seed::from(PDA_SEED), Seed::from(provider.address().as_ref()), Seed::from(&bump_ref)];
     let signer = Signer::from(&seeds);
     TransferChecked::new(payer_ata, mint, payee_ata, authority, amount, decimals).invoke_signed(&[signer])
 }

@@ -104,6 +104,10 @@
         <div class="window__bar"><div class="lights"><i></i><i></i><i></i></div><span class="window__title">Tollgate · Solana devnet</span></div>
         <div class="app">
           <div class="app__chat">
+            <div class="segmented" role="tablist" aria-label="AI provider" style="align-self:flex-start;margin-bottom:12px">
+              <button id="pv-haiku" aria-pressed="true">Claude Haiku · $2 / M tokens</button>
+              <button id="pv-sonnet" aria-pressed="false">Claude Sonnet · $6 / M tokens</button>
+            </div>
             <div id="answer" aria-live="polite"><span class="t-small">Opening your session on Solana devnet…</span></div>
             <form id="ask" class="askrow">
               <input id="q" type="text" aria-label="Your question" placeholder="Ask anything" value="Explain how a payment channel works, in about 200 words." disabled>
@@ -234,7 +238,13 @@ const ex = (sig, label, cls='') => `<a class="${cls}" target="_blank" rel="noope
 const kp = nacl.sign.keyPair();
 // This tab's key owns the wallet: it signs the on-chain approval, the vouchers and the revoke.
 // Before signing, the tab decodes each transaction and checks it against what it agreed to.
-const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', TOLLGATE = '58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj', PDA = '9KhAQuq4X8M5WQCJqdFmCwRLcyHgno4ST6qp7QRycoJp';
+const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', TOLLGATE = '58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj';
+// Each provider's spender is a PDA of the Tollgate program derived from the provider's wallet (pinned here, not taken from the server).
+const PROVIDERS = {
+  haiku: { name: 'Claude Haiku', perM: 2, wallet: 'HBKvsWpsZHdqrwstePVRiKttFjoW3AEaEYNvCezMaFtp', pda: '7oiVMCH4XDhaptH4MQh1AcC61M1FifayFRQCoXKfN2eD' },
+  sonnet: { name: 'Claude Sonnet', perM: 6, wallet: 'CKr6qxg1kFwPNDprnqwYH6Dibk4CTvqSqG1zU2eBofeY', pda: 'Az5BE3LYihAePbJqg8K9XCieZFVQRaPP5tHZJVa49CyA' },
+};
+let provider = 'haiku';
 function parseTx(b64) {
   const m = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); let i = 0;
   const cu16 = () => { let v = 0, sh = 0; for (;;) { const b = m[i++]; v |= (b & 0x7f) << sh; if (!(b & 0x80)) return v; sh += 7; } };
@@ -254,8 +264,8 @@ function checkTx(kind, b64, signedUnits) {
   const me = sessionKey, lines = []; let ok = true;
   for (const x of parseTx(b64)) {
     if (x.program === TOKEN && x.data[0] === 4) {
-      const good = x.accts[1] === PDA && x.accts[2] === me && u64(x.data, 1) <= 250000;
-      lines.push(`${good ? '✓' : '✗'} approve: only the Tollgate program may spend, up to $${(u64(x.data, 1) / 1e6).toFixed(2)}`); ok = ok && good;
+      const good = x.accts[1] === PROVIDERS[provider].pda && x.accts[2] === me && u64(x.data, 1) <= 250000;
+      lines.push(`${good ? '✓' : '✗'} approve: only the Tollgate program, for ${PROVIDERS[provider].name}, may spend, up to $${(u64(x.data, 1) / 1e6).toFixed(2)}`); ok = ok && good;
     } else if (x.program === TOKEN && x.data[0] === 5) lines.push('✓ revoke: the program can spend nothing more');
     else if (x.program === TOKEN && (x.data[0] === 3 || x.data[0] === 12) && x.accts.includes(me)) { lines.push('✗ a transfer signed by this wallet'); ok = false; }
     else if (x.program === TOLLGATE) {
@@ -288,7 +298,7 @@ async function signAndSend(cumulativeAmount, cumulativeTokens) {
 
 async function start() {
   try {
-    const o = await post('/api/open', { sessionKey });
+    const o = await post('/api/open', { sessionKey, provider });
     const c = checkTx('open', o.message, 0);
     if (!c.ok) throw new Error('this tab refused to sign the open transaction: ' + c.lines.join('; '));
     S = await post('/api/open/confirm', { id: o.id, signature: signMessage(o.message) });
@@ -411,6 +421,16 @@ $('guided').addEventListener('click', async () => {
   $('settle').click();
   while (!/Paid/.test($('result').innerHTML)) await sleep(200);
   say('Done. Every step above has an explorer link.');
+});
+for (const id of ['haiku', 'sonnet']) $('pv-' + id).addEventListener('click', async () => {
+  if (provider === id || ($('send').disabled && S)) return;
+  provider = id;
+  for (const k of ['haiku', 'sonnet']) $('pv-' + k).setAttribute('aria-pressed', String(k === id));
+  vouchers = 0; lastSigned = 0; $('vouchers').innerHTML = ''; $('links').innerHTML = ''; $('result').innerHTML = '';
+  $('cost').textContent = usd(0); $('tokens').textContent = '0 tokens paid · 0 vouchers';
+  $('answer').innerHTML = `<span class="t-small">Opening a session with ${PROVIDERS[id].name} on Solana devnet…</span>`;
+  ['q', 'send', 'over', 'settle', 'guided', 'agentBtn'].forEach(i => $(i).disabled = true);
+  await start();
 });
 start();
 </script>
