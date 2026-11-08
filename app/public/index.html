@@ -89,7 +89,7 @@
 
 <header class="hero hero--color" id="top">
   <div class="container">
-    <span class="badge badge--dot">Live on Solana devnet</span>
+    <span class="badge badge--dot" id="liveBadge">Live on Solana devnet</span>
     <h1>Pay for AI by the token. <span class="t-muted">Stop paying and it stops.</span></h1>
     <p class="lead">Your browser signs a tiny USDC voucher every 50 tokens. The answer streams only while you keep signing, and one Solana transaction settles exactly what you used.</p>
     <div class="cta-row">
@@ -344,7 +344,7 @@ $('ask').addEventListener('submit', e => {
     if ($('paying').checked) await signAndSend(d.cumulativeAmount, d.cumulativeTokens);
     else { pendingAsk = d; if (!document.querySelector('#answer .wait')) $('answer').insertAdjacentHTML('beforeend', '<div class="wait">Waiting for payment. Turn on Keep paying to continue.</div>'); }
   });
-  es.addEventListener('done', ev => { const d = JSON.parse(ev.data); if (d.modelTokens) $('out').insertAdjacentHTML('afterend', `<div class="count">Model's own count: ${d.modelTokens} output tokens · paid for ${d.paidTokens} (vouchers cover 50-token blocks)</div>`); es.close(); $('send').disabled = false; });
+  es.addEventListener('done', ev => { const d = JSON.parse(ev.data); if (d.modelTokens) $('out').insertAdjacentHTML('afterend', `<div class="count">Model's own count: ${d.modelTokens} output tokens · paid for ${d.paidTokens} (a last voucher tops up to the model's count, in 50-token blocks)</div>`); es.close(); $('send').disabled = false; });
   es.addEventListener('error', ev => { try { const d = JSON.parse(ev.data); $('answer').insertAdjacentHTML('beforeend', `<div class="bad">${d.message}</div>`); } catch {} es.close(); $('send').disabled = false; });
 });
 
@@ -379,6 +379,7 @@ $('settle').addEventListener('click', async () => {
 fetch('/api/stats').then(r => r.json()).then(s => {
   if (s.settledSessions == null) return;
   $('statSessions').textContent = s.settledSessions; $('statRefused').textContent = s.refusedOvercharges;
+  $('liveBadge').textContent = `Live on Solana devnet · ${s.settledSessions} payouts settled · ${s.refusedOvercharges} refused`;
   $('stats').innerHTML = `<a class="t-accent" target="_blank" rel="noopener" href="https://explorer.solana.com/address/${s.payeeAccount}?cluster=devnet">See the provider's token account on the explorer ↗</a>`;
 }).catch(() => {});
 

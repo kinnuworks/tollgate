@@ -122,6 +122,17 @@ app.get('/api/chat', async (req, res) => {
     }
     await new Promise(r => setTimeout(r, 30));
   }
+  // True-up: the live count is an estimate; when the model reports more tokens than were paid,
+  // ask the tab for one last voucher (rounded up to the 50-token block) before closing.
+  if (!closed && finalTokens) {
+    const billed = (s.tokensBefore || 0) + finalTokens;
+    if (billed > s.paidTokens) {
+      const need = Math.ceil(billed / BLOCK) * BLOCK;
+      send('pay', { cumulativeTokens: need, cumulativeAmount: (BigInt(need) * s.prov.unitsPerToken).toString(), trueUp: true });
+      const t0 = Date.now();
+      while (!closed && s.paidTokens < need && Date.now() - t0 < 6000) await new Promise(r => { s.waiters.push(r); setTimeout(r, 500); });
+    }
+  }
   s.tokensBefore = s.tokens;
   s.history.push({ role: 'assistant', content: answer || '…' });
   send('done', { tokens: s.tokens, modelTokens: finalTokens, paidTokens: s.paidTokens, paidAmount: s.paidAmount.toString() });
