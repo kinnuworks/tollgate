@@ -24,6 +24,7 @@ const CHARS_PER_TOKEN = 4;          // live estimate; reconciled to the model's 
 
 const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: 'https://api.anthropic.com' });
 const sessions = new Map();
+const recent = []; // latest settled sessions, newest first (since this server started)
 const app = express();
 app.use(express.json());
 app.use(express.static(new URL('./public', import.meta.url).pathname));
@@ -203,6 +204,8 @@ app.post('/api/settle', async (req, res) => {
     }
     const r = await submitWithPayerSignature(s.pendingSettle, s.payerAddress, bs58.decode(req.body.signature));
     s.settled = { sig: r.sig, ms: r.ms, paid: s.paidAmount.toString(), refunded: (FUNDING - s.paidAmount).toString() };
+    recent.unshift({ provider: s.prov.name, tokens: s.paidTokens, paid: s.paidAmount.toString(), ms: r.ms, sig: r.sig, usdc: s.mint === USDC_MINT, agent: !!s.agentLog, at: Date.now() });
+    recent.length = Math.min(recent.length, 8);
     res.json(pub(s));
   } catch (e) {
     console.error('settle', e);
@@ -213,6 +216,8 @@ app.post('/api/settle', async (req, res) => {
 app.get('/api/stats', async (_, res) => {
   try { res.json(await stats()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
+app.get('/api/recent', (_, res) => res.json(recent.slice(0, 5)));
+
 app.get('/api/providers', async (_, res) => {
   const list = [];
   for (const p of Object.values(PROVIDERS)) list.push({ id: p.id, name: p.name, model: p.model, usdPerMillion: Number(p.unitsPerToken), wallet: p.wallet, pda: (await pdaFor(p.wallet))[0] });
