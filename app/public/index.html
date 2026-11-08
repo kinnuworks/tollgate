@@ -139,7 +139,7 @@
       <div class="tile reveal" style="--i:0">
         <span class="num">1</span>
         <div class="t-title" style="margin-top:12px">Open</div>
-        <p>Your tab makes a wallet that receives $0.50 of test USDC. It approves the Tollgate program, not the provider, to spend at most $0.25.</p>
+        <p>Your tab makes a wallet that receives $0.50 of devnet USDC. It approves the Tollgate program, not the provider, to spend at most $0.25.</p>
         <span class="t-mono">mintTo 0.50 · approve(tollgate PDA, 0.25)</span>
       </div>
       <div class="tile reveal" style="--i:1">
@@ -188,7 +188,7 @@
   <div class="container">
     <div class="section-head"><h2>Questions.</h2></div>
     <div class="faq">
-      <details><summary>Is this real money?</summary><p>No. Everything runs on Solana devnet with a test USDC token this project minted (6 decimals). The transactions are real devnet transactions, and every one is linked.</p></details>
+      <details><summary>Is this real money?</summary><p>No. Everything runs on Solana devnet. Sessions are funded with Circle's devnet USDC while our faucet balance lasts, and with a test token this project minted (6 decimals) after that; the page says which one your session got. The transactions are real devnet transactions, and every one is linked.</p></details>
       <details><summary>Who holds the wallet's key?</summary><p>Your browser tab. It generates the key, signs the approval, the vouchers and the revoke, and never sends the key anywhere. The server adds only the fee-payer signature and mints test USDC into the wallet.</p></details>
       <details><summary>What stops the provider from charging more than I signed for?</summary><p>The Tollgate program. Your tab approves it, not the provider, as the spender. At settle it needs your tab's signature, reads your voucher from Solana's Ed25519 signature check in the same transaction, and pays at most the signed amount. Anything more fails with error 1, even when your tab co-signs it, and a settle your tab didn't sign fails with error 6. The approval also caps the total at $0.25. The voucher format is the one the Solana Foundation's payment channels use.</p></details>
       <details><summary>What does the AI do?</summary><p>It answers your question. Anthropic's Claude Haiku model streams the text, the gateway meters it at about 4 characters per token, and the model's own token count appears under the answer when it finishes. You pay in 50-token blocks at $2 per million tokens.</p></details>
@@ -252,7 +252,7 @@ async function start() {
   try {
     const o = await post('/api/open', { sessionKey });
     S = await post('/api/open/confirm', { id: o.id, signature: signMessage(o.message) });
-    $('answer').innerHTML = '<span class="t-small">Session open. This tab made its own wallet, which now holds $0.50 of test USDC. The tab approved the Tollgate program to spend at most $0.25 of it, and only against vouchers the tab signs. Ask something.</span>';
+    $('answer').innerHTML = '<span class="t-small">Session open. This tab made its own wallet, which now holds $0.50 of ' + (S.realUsdc ? 'Circle devnet USDC' : 'test USDC') + '. The tab approved the Tollgate program to spend at most $0.25 of it, and only against vouchers the tab signs. Ask something.</span>';
     $('links').innerHTML = ex(S.openSig, 'Open: fund $0.50 + approve the program for $0.25 ↗');
     ['q', 'send', 'over', 'settle', 'guided'].forEach(i => $(i).disabled = false);
   } catch (e) {

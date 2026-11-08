@@ -21,7 +21,10 @@ import {
 } from '@solana-program/token';
 
 export const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
-export const MINT = address(process.env.MINT || '37y7f51uFjHJ8QjYSPtf49261f3jphqYZrQXgXuM7Jd8');
+export const TEST_MINT = address(process.env.MINT || '37y7f51uFjHJ8QjYSPtf49261f3jphqYZrQXgXuM7Jd8');
+// Circle's USDC on Solana devnet. Sessions use it while the operator holds enough; otherwise the test mint.
+export const USDC_MINT = address('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
+export const MINT = TEST_MINT;
 export const DECIMALS = 6;
 export const DEPOSIT = 250_000n; // the on-chain cap: 0.25 test USDC
 export const FUNDING = 500_000n; // the wallet holds more than the cap, so a refusal can only come from the cap
@@ -35,7 +38,18 @@ function loadKey(envName, file) {
 const operatorP = loadKey('OPERATOR_KEY', new URL('./keys/operator.json', import.meta.url).pathname);
 const payeeP = loadKey('PAYEE_KEY', new URL('./keys/payee.json', import.meta.url).pathname);
 
-const ata = async (owner) => (await findAssociatedTokenPda({ mint: MINT, owner, tokenProgram: TOKEN_PROGRAM_ADDRESS }))[0];
+const ata = async (owner, mint = MINT) => (await findAssociatedTokenPda({ mint, owner, tokenProgram: TOKEN_PROGRAM_ADDRESS }))[0];
+
+// Which mint to fund the next session with: Circle's devnet USDC when the operator holds enough.
+export async function pickMint() {
+  try {
+    const operator = await operatorP;
+    const opAta = await ata(operator.address, USDC_MINT);
+    const { value } = await retry(() => rpc.getTokenAccountBalance(opAta, { commitment: 'confirmed' }).send());
+    return BigInt(value.amount) >= FUNDING ? USDC_MINT : TEST_MINT;
+  } catch { return TEST_MINT; }
+}
+
 
 async function retry(fn, tries = 4) {
   for (let i = 0; ; i++) {
@@ -112,14 +126,17 @@ const pdaP = getProgramDerivedAddress({ programAddress: PROGRAM_ID, seeds: ['tol
 const b58 = getBase58Encoder();
 
 // The tab approves the Tollgate program's PDA (not the provider) to spend at most the cap.
-export async function prepareOpen(payerAddress) {
+export async function prepareOpen(payerAddress, mint = MINT) {
   const operator = await operatorP;
   const [pda] = await pdaP;
   const owner = createNoopSigner(address(payerAddress));
-  const payerAta = await ata(owner.address);
+  const payerAta = await ata(owner.address, mint);
+  const fund = mint === USDC_MINT
+    ? getTransferCheckedInstruction({ source: await ata(operator.address, mint), mint, destination: payerAta, authority: operator, amount: FUNDING, decimals: DECIMALS })
+    : getMintToInstruction({ mint, token: payerAta, mintAuthority: operator, amount: FUNDING });
   return prepare([
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: owner.address, mint: MINT }),
-    getMintToInstruction({ mint: MINT, token: payerAta, mintAuthority: operator, amount: FUNDING }),
+    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: owner.address, mint }),
+    fund,
     getApproveInstruction({ source: payerAta, delegate: pda, owner, amount: DEPOSIT }),
   ]);
 }
@@ -137,9 +154,9 @@ function ed25519Ix(pubkeyB58, sigB58, message) {
   return { programAddress: ED25519_PROGRAM, accounts: [], data };
 }
 
-async function settleIxs(ownerSigner, amount, voucher) {
+async function settleIxs(ownerSigner, amount, voucher, mint = MINT) {
   const [pda, bump] = await pdaP;
-  const { ix, payeeAta } = await ensurePayeeAta();
+  const { ix, payeeAta } = await ensurePayeeAta(mint);
   const owner = ownerSigner.address;
   const payerAddress = owner;
   const data = new Uint8Array(11); const dv = new DataView(data.buffer);
@@ -147,8 +164,8 @@ async function settleIxs(ownerSigner, amount, voucher) {
   return [ix,
     ed25519Ix(payerAddress, voucher.signature, encodeVoucherMessageBytes({ channelId: payerAddress, cumulativeAmount: BigInt(voucher.amount), expiresAt: BigInt(voucher.expiresAt) })),
     { programAddress: PROGRAM_ID, data, accounts: [
-      { address: await ata(owner), role: AccountRole.WRITABLE },
-      { address: MINT, role: AccountRole.READONLY },
+      { address: await ata(owner, mint), role: AccountRole.WRITABLE },
+      { address: mint, role: AccountRole.READONLY },
       { address: payeeAta, role: AccountRole.WRITABLE },
       { address: pda, role: AccountRole.READONLY },
       { address: owner, role: AccountRole.READONLY_SIGNER, signer: ownerSigner },
@@ -158,25 +175,25 @@ async function settleIxs(ownerSigner, amount, voucher) {
 }
 
 // Settle: Tollgate checks the voucher on-chain and pays at most the signed amount; the tab signs the revoke.
-export async function prepareSettle(payerAddress, amount, voucher) {
+export async function prepareSettle(payerAddress, amount, voucher, mint = MINT) {
   const owner = createNoopSigner(address(payerAddress));
-  const ixs = amount > 0n && voucher ? await settleIxs(owner, amount, voucher) : [];
-  ixs.push(getRevokeInstruction({ source: await ata(owner.address), owner }));
+  const ixs = amount > 0n && voucher ? await settleIxs(owner, amount, voucher, mint) : [];
+  ixs.push(getRevokeInstruction({ source: await ata(owner.address, mint), owner }));
   return prepare(ixs);
 }
 
-async function ensurePayeeAta() {
+async function ensurePayeeAta(mint = MINT) {
   const operator = await operatorP;
   const payee = await payeeP;
-  return { ix: await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: payee.address, mint: MINT }), payeeAta: await ata(payee.address) };
+  return { ix: await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: payee.address, mint }), payeeAta: await ata(payee.address, mint) };
 }
 
 // A settle for $0.30 against the tab's latest voucher. The tab co-signs it (as it
 // would sign anything the server sends), and the Tollgate program still refuses.
-export async function prepareOvercharge(payerAddress, voucher) {
+export async function prepareOvercharge(payerAddress, voucher, mint = MINT) {
   const owner = createNoopSigner(address(payerAddress));
   const v = voucher || { amount: '0', expiresAt: 0, signature: '1111111111111111111111111111111111111111111111111111111111111111' };
-  return prepare(await settleIxs(owner, DEPOSIT + 50_000n, v));
+  return prepare(await settleIxs(owner, DEPOSIT + 50_000n, v, mint));
 }
 
 // Public proof of use: successful payouts into the provider's token account.
@@ -184,10 +201,13 @@ let statsCache = { at: 0, value: null };
 export async function stats() {
   if (statsCache.value && Date.now() - statsCache.at < 20_000) return statsCache.value;
   const payee = await payeeP;
-  const payeeAccount = await ata(payee.address);
-  const sigs = await retry(() => rpc.getSignaturesForAddress(payeeAccount, { limit: 1000 }).send());
-  const ok = sigs.filter(s => !s.err);
-  const value = { settledSessions: ok.length, refusedOvercharges: sigs.length - ok.length, payeeAccount, payee: payee.address };
+  let ok = 0, failed = 0;
+  for (const mint of [TEST_MINT, USDC_MINT]) {
+    const acct = await ata(payee.address, mint);
+    const sigs = await retry(() => rpc.getSignaturesForAddress(acct, { limit: 1000 }).send()).catch(() => []);
+    ok += sigs.filter(x => !x.err).length; failed += sigs.filter(x => x.err).length;
+  }
+  const value = { settledSessions: ok, refusedOvercharges: failed, payeeAccount: payee.address, payee: payee.address };
   statsCache = { at: Date.now(), value };
   return value;
 }

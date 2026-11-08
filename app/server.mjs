@@ -14,7 +14,7 @@ import bs58 from 'bs58';
 import Anthropic from '@anthropic-ai/sdk';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { encodeVoucherMessageBytes } from '@solana/mpp/server';
-import { prepareOpen, prepareSettle, submitWithPayerSignature, prepareOvercharge, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
+import { prepareOpen, prepareSettle, submitWithPayerSignature, prepareOvercharge, pickMint, USDC_MINT, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.MODEL || 'claude-haiku-5-5';
@@ -29,7 +29,7 @@ app.use(express.json());
 app.use(express.static(new URL('./public', import.meta.url).pathname));
 
 const pub = s => ({
-  id: s.id, payer: s.payerAddress, payee: s.payee, mint: MINT, deposit: DEPOSIT.toString(), funding: FUNDING.toString(),
+  id: s.id, payer: s.payerAddress, payee: s.payee, mint: s.mint, realUsdc: s.mint === USDC_MINT, deposit: DEPOSIT.toString(), funding: FUNDING.toString(),
   paidAmount: s.paidAmount.toString(), paidTokens: s.paidTokens, tokens: s.tokens, vouchers: s.vouchers.length,
   openSig: s.openSig, settled: s.settled || null,
 });
@@ -39,8 +39,9 @@ app.post('/api/open', async (req, res) => {
     const sessionKey = String(req.body.sessionKey || '');
     if (bs58.decode(sessionKey).length !== 32) throw new Error('bad session key');
     const id = crypto.randomUUID();
-    const { tx, message } = await prepareOpen(sessionKey);
-    const s = { id, sessionKey, payerAddress: sessionKey, payee: null, paidAmount: 0n, paidTokens: 0, tokens: 0, vouchers: [], waiters: [], history: [], pending: tx };
+    const mint = await pickMint();
+    const { tx, message } = await prepareOpen(sessionKey, mint);
+    const s = { id, sessionKey, mint, payerAddress: sessionKey, payee: null, paidAmount: 0n, paidTokens: 0, tokens: 0, vouchers: [], waiters: [], history: [], pending: tx };
     sessions.set(id, s);
     res.json({ id, message });
   } catch (e) {
@@ -145,7 +146,7 @@ app.post('/api/overcharge', async (req, res) => {
   if (!s) return res.status(404).json({ error: 'no session' });
   try {
     if (!req.body.signature) {
-      const { tx, message } = await prepareOvercharge(s.payerAddress, s.vouchers.at(-1));
+      const { tx, message } = await prepareOvercharge(s.payerAddress, s.vouchers.at(-1), s.mint);
       s.pendingOver = tx;
       return res.json({ message, amount: (DEPOSIT + 50_000n).toString(), signedFor: s.paidAmount.toString() });
     }
@@ -162,7 +163,7 @@ app.post('/api/settle', async (req, res) => {
   if (s.settled) return res.json(pub(s));
   try {
     if (!req.body.signature) {
-      const { tx, message } = await prepareSettle(s.payerAddress, s.paidAmount, s.vouchers.at(-1));
+      const { tx, message } = await prepareSettle(s.payerAddress, s.paidAmount, s.vouchers.at(-1), s.mint);
       s.pendingSettle = tx;
       return res.json({ message, amount: s.paidAmount.toString() });
     }

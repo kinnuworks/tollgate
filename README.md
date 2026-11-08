@@ -43,7 +43,7 @@ signs voucher (amount, expiry) ───► checks the signature, releases
 
 ## What is real and what isn't
 
-- Every transaction is real and on Solana devnet. The USDC is a test token this project minted on devnet ("test USDC", 6 decimals). It is not Circle's USDC.
+- Every transaction is real and on Solana devnet. Sessions are funded with Circle's devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`) while the operator's faucet balance lasts, and with a test token this project minted (6 decimals) after that. The app says which one your session got. The Tollgate program works with either mint.
 - Your browser tab makes its own wallet. Its key never leaves the tab, and it signs the on-chain approval, every voucher and the revoke at settle. The server only pays network fees and mints test USDC into the wallet, so you don't need a wallet extension. The key lives in page memory, so a reload starts a new wallet.
 - The token count during streaming is an estimate (about 4 characters per token). The model's own count is shown under the answer when it ends.
 - The gateway decides when to stop streaming; the chain decides how much can be paid. The settle amount is checked on-chain against the signed voucher.
