@@ -108,8 +108,8 @@ async function signAndSend(cumulativeAmount, cumulativeTokens) {
 async function start() {
   try {
     S = await post('/api/open', { sessionKey });
-    $('answer').innerHTML = '<span class="muted">Session open. $0.25 of test USDC is in a fresh wallet, and the provider is approved on-chain to take at most that. Ask something.</span>';
-    $('links').innerHTML = ex(S.openSig, 'Open: fund + approve the $0.25 cap ↗');
+    $('answer').innerHTML = '<span class="muted">Session open. A fresh wallet holds $0.50 of test USDC, and the provider is approved on-chain to take at most $0.25 of it. Ask something.</span>';
+    $('links').innerHTML = ex(S.openSig, 'Open: fund $0.50 + approve a $0.25 cap ↗');
     ['q', 'send', 'over', 'settle', 'guided'].forEach(i => $(i).disabled = false);
   } catch (e) {
     $('answer').innerHTML = `<span class="bad">Could not open a session: ${e.message}. Devnet may be busy; reload to try again.</span>`;
@@ -136,7 +136,7 @@ $('ask').addEventListener('submit', e => {
     if ($('paying').checked) await signAndSend(d.cumulativeAmount, d.cumulativeTokens);
     else { pendingAsk = d; if (!document.querySelector('#answer .wait')) $('answer').insertAdjacentHTML('beforeend', '<div class="wait">Waiting for payment… (tick "Keep paying" to continue)</div>'); }
   });
-  es.addEventListener('done', ev => { es.close(); $('send').disabled = false; });
+  es.addEventListener('done', ev => { const d = JSON.parse(ev.data); if (d.modelTokens) $('out').insertAdjacentHTML('afterend', `<div class="muted">Model's own count: ${d.modelTokens} output tokens · paid for ${d.paidTokens} (vouchers cover 50-token blocks)</div>`); es.close(); $('send').disabled = false; });
   es.addEventListener('error', ev => { try { const d = JSON.parse(ev.data); $('answer').insertAdjacentHTML('beforeend', `<div class="bad">${d.message}</div>`); } catch {} es.close(); $('send').disabled = false; });
 });
 
@@ -144,7 +144,7 @@ $('over').addEventListener('click', async () => {
   $('over').disabled = true; $('result').innerHTML = '<span class="muted">Provider is trying to pull $0.30…</span>';
   try {
     const r = await post('/api/overcharge', { id: S.id });
-    $('result').innerHTML = r.failed ? '<span class="ok">Refused on-chain: the token program won\'t let the provider take more than the $0.25 you approved.</span>' : '<span class="bad">Unexpected: the transfer went through.</span>';
+    $('result').innerHTML = r.failed ? '<span class="ok">Refused on-chain. The wallet holds $0.50, but the token program won\'t let the provider take more than the $0.25 you approved.</span>' : '<span class="bad">Unexpected: the transfer went through.</span>';
     if (r.sig) $('links').insertAdjacentHTML('beforeend', ex(r.sig, 'Refused overcharge (failed transaction) ↗', 'bad'));
   } catch (e) { $('result').innerHTML = `<span class="bad">${e.message}</span>`; }
   $('over').disabled = false;

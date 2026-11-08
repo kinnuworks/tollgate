@@ -10,7 +10,7 @@ Why Solana: paying a fraction of a cent per answer only works if settling costs 
 
 Open the link and press **Run the 60-second demo**. It does the steps below on its own, with an explorer link for each one. To do it by hand:
 
-1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.25 of test USDC, and the AI provider is approved on-chain to take at most that.
+1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.50 of test USDC, and the AI provider is approved on-chain to take at most $0.25 of it.
 2. Click **Ask**. The answer streams in while the tab signs a payment voucher every 50 tokens. The meter shows what you've paid so far.
 3. Untick **Keep paying** while it's answering. The text stops with "Waiting for payment…". Tick it again and it carries on.
 4. Click **Provider tries to take $0.30**. The token program refuses it on-chain, and you get the failed transaction's link.
@@ -30,7 +30,7 @@ signs voucher (amount, expiry) ───► checks the signature against the
 ```
 
 - **Vouchers.** Each voucher is the 50-byte format used by the Solana Foundation's payment channels (`0x56 0x01 · channel id · cumulative amount u64 · expiry i64`), signed with the tab's own ed25519 key. The gateway won't stream past what the latest voucher covers.
-- **On-chain cap.** At open, the payer approves the provider as an SPL token delegate for the deposit, $0.25. The provider can't take more than that. The "take $0.30" button proves it with a real failed transaction.
+- **On-chain cap.** At open, a fresh wallet gets $0.50 of test USDC and approves the provider as an SPL token delegate for $0.25. The provider can't take more than that. The "take $0.30" button proves it with a real failed transaction.
 - **Settle.** One transaction transfers the last signed total to the provider and revokes the approval.
 - **Price.** $2 per million tokens (2 base units of 6-decimal USDC per token).
 
@@ -38,8 +38,9 @@ signs voucher (amount, expiry) ───► checks the signature against the
 
 - Every transaction is real and on Solana devnet. The USDC is a test token this project minted on devnet ("test USDC", 6 decimals). It is not Circle's USDC.
 - In the demo, the server funds the payer wallet and holds its key so you don't need a wallet. The voucher key is generated in your browser tab and never leaves it.
-- The token count during streaming is an estimate (about 4 characters per token). The model's own count is shown when the answer ends.
-- The voucher limit is enforced by the gateway. The chain enforces the $0.25 cap and the final transfer. A dishonest provider could pull up to the cap, not more. Settling against a signed voucher on-chain is the job of the Solana Foundation's payment-channels program. We opened and settled channels on it on devnet. Its payout step failed against devnet's treasury account, so the demo uses token delegation instead.
+- The token count during streaming is an estimate (about 4 characters per token). The model's own count is shown under the answer when it ends. You pay in 50-token blocks.
+- The voucher limit is enforced by the gateway. The chain enforces the $0.25 cap (the demo wallet holds $0.50, so the refused $0.30 pull fails because of the cap, not the balance) and the final transfer. A dishonest provider could pull up to the cap, not more.
+- Settling against a signed voucher on-chain is the job of the Solana Foundation's payment-channels program. We opened a channel on it on devnet with this same voucher format ([open transaction](https://explorer.solana.com/tx/5NtC5ZKkgZqm4gMSPJFh9cGHACmUeKDLKiKuW2NJ1qaReur1KZ3EDREZktxcV1MGcz6KNx2AmGS39nsr3QSrzhgx?cluster=devnet)). Its settle-and-payout transaction failed on devnet's treasury account check (`TreasuryAccountMismatch`), so the demo moves money with SPL token delegation instead.
 - One provider (this project) and one model.
 
 ## Run it locally

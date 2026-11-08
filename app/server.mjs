@@ -14,7 +14,7 @@ import bs58 from 'bs58';
 import Anthropic from '@anthropic-ai/sdk';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { encodeVoucherMessageBytes } from '@solana/mpp/server';
-import { openSession, settle, tryOvercharge, stats, DEPOSIT, MINT } from './chain.mjs';
+import { openSession, settle, tryOvercharge, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.MODEL || 'claude-haiku-5-5';
@@ -29,7 +29,7 @@ app.use(express.json());
 app.use(express.static(new URL('./public', import.meta.url).pathname));
 
 const pub = s => ({
-  id: s.id, payer: s.payerAddress, payee: s.payee, mint: MINT, deposit: DEPOSIT.toString(),
+  id: s.id, payer: s.payerAddress, payee: s.payee, mint: MINT, deposit: DEPOSIT.toString(), funding: FUNDING.toString(),
   paidAmount: s.paidAmount.toString(), paidTokens: s.paidTokens, tokens: s.tokens, vouchers: s.vouchers.length,
   openSig: s.openSig, settled: s.settled || null,
 });
@@ -138,7 +138,7 @@ app.post('/api/settle', async (req, res) => {
   if (s.settled) return res.json(pub(s));
   try {
     const r = await settle(s.payer, s.paidAmount);
-    s.settled = { sig: r.sig, ms: r.ms, paid: s.paidAmount.toString(), refunded: (DEPOSIT - s.paidAmount).toString() };
+    s.settled = { sig: r.sig, ms: r.ms, paid: s.paidAmount.toString(), refunded: (FUNDING - s.paidAmount).toString() };
     res.json(pub(s));
   } catch (e) {
     console.error('settle', e);

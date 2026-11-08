@@ -20,7 +20,8 @@ import {
 export const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
 export const MINT = address(process.env.MINT || '37y7f51uFjHJ8QjYSPtf49261f3jphqYZrQXgXuM7Jd8');
 export const DECIMALS = 6;
-export const DEPOSIT = 250_000n; // 0.25 test USDC
+export const DEPOSIT = 250_000n; // the on-chain cap: 0.25 test USDC
+export const FUNDING = 500_000n; // the wallet holds more than the cap, so a refusal can only come from the cap
 
 const rpc = createSolanaRpc(RPC_URL);
 
@@ -86,7 +87,7 @@ export async function openSession() {
   const payerAta = await ata(payer.address);
   const { sig, ms } = await send(operator, [
     await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: payer.address, mint: MINT }),
-    getMintToInstruction({ mint: MINT, token: payerAta, mintAuthority: operator, amount: DEPOSIT }),
+    getMintToInstruction({ mint: MINT, token: payerAta, mintAuthority: operator, amount: FUNDING }),
     getApproveInstruction({ source: payerAta, delegate: payee.address, owner: payer, amount: DEPOSIT }),
   ]);
   return { payer, payerAddress: payer.address, payee: payee.address, openSig: sig, openMs: ms };
