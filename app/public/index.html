@@ -1,67 +1,202 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-mood="cobalt" data-accent="cobalt">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tollgate</title>
+<meta name="description" content="Pay for AI by the token in USDC on Solana. Stop paying and the answer stops.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400..600&family=Public+Sans:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>document.documentElement.classList.add('js')</script>
+<link rel="stylesheet" href="foundation.css">
 <style>
-  :root { --bg:#fff; --fg:#111; --muted:#666; --line:#e3e3e3; --ok:#0a7d32; --bad:#b42318; --accent:#2f5bea; }
-  * { box-sizing: border-box; }
-  body { margin:0; font:15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; color:var(--fg); background:var(--bg); }
-  header { padding:20px 24px 8px; max-width:1100px; margin:auto; }
-  h1 { margin:0; font-size:22px; }
-  header p { margin:4px 0 0; color:var(--muted); }
-  main { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; padding:12px 24px 40px; max-width:1100px; margin:auto; }
-  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
-  section { border:1px solid var(--line); border-radius:8px; padding:16px; }
-  #answer { min-height:220px; white-space:pre-wrap; }
-  #answer .wait { color:var(--bad); font-style:italic; }
-  form { display:flex; gap:8px; margin-top:12px; }
-  input[type=text] { flex:1; padding:10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
-  button { padding:9px 14px; border:1px solid var(--line); border-radius:6px; background:#f6f6f6; font:inherit; cursor:pointer; }
-  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  button:disabled { opacity:.5; cursor:default; }
-  .meter { font-size:28px; font-variant-numeric: tabular-nums; }
-  .row { display:flex; justify-content:space-between; gap:8px; }
-  .muted { color:var(--muted); font-size:13px; }
-  #vouchers { max-height:180px; overflow:auto; font:12px/1.5 ui-monospace, Menlo, monospace; border-top:1px solid var(--line); margin-top:8px; padding-top:8px; }
-  .actions { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
-  .links a { display:block; font-size:13px; }
-  .ok { color:var(--ok); } .bad { color:var(--bad); }
-  .toggle { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  /* Tollgate app UI inside the hero window */
+  .app{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);min-height:470px}
+  .app>*{min-width:0}
+  .hero__visual .window{max-width:100%}
+  .app__chat{display:flex;flex-direction:column;padding:20px 22px;border-right:1px solid var(--line)}
+  .app__side{display:flex;flex-direction:column;gap:14px;padding:20px 22px;background:var(--surface-2)}
+  #answer{flex:1;min-height:240px;max-height:330px;overflow:auto;font-size:15px;line-height:1.6;color:var(--ink-2);white-space:pre-wrap}
+  #answer .you{font-size:13px;color:var(--ink-3);margin-bottom:8px;white-space:normal}
+  #answer .wait{margin-top:10px;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:var(--r-pill);background:#FFF1E6;color:#9A3412;font-size:13.5px;font-weight:550;white-space:normal}
+  #answer .wait::before{content:"";width:7px;height:7px;border-radius:50%;background:#EA580C}
+  #answer .bad{color:#B42318;white-space:normal}
+  #answer .count{margin-top:10px;font-size:13px;color:var(--ink-3);white-space:normal}
+  .askrow{display:flex;gap:8px;margin-top:14px;padding:6px;border-radius:var(--r-pill);background:var(--surface);box-shadow:var(--ring)}
+  .askrow:focus-within{box-shadow:0 0 0 2px var(--focus)}
+  .askrow input{flex:1;min-width:0;padding:0 12px;border:0;outline:0;background:transparent;font:inherit;font-size:14.5px;color:var(--ink)}
+  .askrow .btn{--h:40px}
+  .payrow{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:14px;color:var(--ink-2)}
+  .meter{font:500 40px/1 var(--font-mono);letter-spacing:-.03em;color:var(--ink)}
+  .meter-sub{margin-top:6px;font-size:13.5px;color:var(--ink-3)}
+  .capbox{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:var(--r-md);background:var(--accent-wash);font-size:13.5px;color:var(--accent-ink)}
+  .capbox b{font-family:var(--font-mono);font-weight:500}
+  #vouchers{flex:1;min-height:96px;max-height:150px;overflow:auto;padding:10px 12px;border-radius:var(--r-md);background:var(--surface);box-shadow:var(--ring);font:12px/1.7 var(--font-mono);color:var(--ink-2)}
+  #vouchers:empty::before{content:"Vouchers appear here as the answer streams.";font-family:var(--font-body);color:var(--ink-3)}
+  #vouchers div{display:flex;gap:8px;align-items:center}
+  #vouchers div::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .actions{display:flex;gap:8px;flex-wrap:wrap}
+  .actions .btn{--h:40px;flex:1;padding:0 14px;font-size:14px}
+  .btn:disabled{opacity:.45;cursor:default;transform:none}
+  #result{font-size:14px;color:var(--ink-2)}
+  #result .ok{color:#1F7A3D;font-weight:550}
+  #result .bad{color:#B42318}
+  #result b{color:var(--ink)}
+  .links{display:grid;gap:4px}
+  .links a{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--accent-ink);font-weight:550}
+  .links a::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .links a.bad{color:#B42318}.links a.bad::before{background:#B42318}
+  .links a.ok{color:#1F7A3D}.links a.ok::before{background:#1F7A3D}
+  #step{display:block;min-height:22px;margin-top:14px;font-size:14px;color:rgba(255,255,255,.82)}
+  .proof{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+  .stat{padding:26px;border-radius:var(--r-xl);background:var(--surface);box-shadow:var(--ring)}
+  .stat__num{font:500 clamp(36px,4vw,52px)/1 var(--font-mono);letter-spacing:-.04em}
+  .stat p{margin-top:10px;font-size:var(--fs-small);color:var(--ink-3)}
+  .flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+  .flow .tile{flex-direction:column}
+  .flow .t-mono{display:block;margin-top:12px;padding:10px 12px;border-radius:var(--r-sm);background:var(--sunk);font-size:12.5px;color:var(--ink-2)}
+  .num{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--on-accent);font:600 13px/1 var(--font-mono)}
+  .why{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:28px}
+  @media (max-width:900px){.app{grid-template-columns:minmax(0,1fr)}.app__chat{border-right:0;border-bottom:1px solid var(--line)}.proof,.flow{grid-template-columns:1fr}}
+  @media (max-width:640px){.why{grid-template-columns:1fr}.meter{font-size:32px}.window__title{display:none}.app__chat,.app__side{padding:16px}}
 </style>
 </head>
 <body>
-<header>
-  <h1>Tollgate</h1>
-  <p>Pay for AI by the token in USDC on Solana. Stop paying and the answer stops. Whatever you don't use stays yours.</p>
-  <p class="muted" id="stats"></p>
-  <div style="margin-top:10px"><button class="primary" id="guided" disabled>Run the 60-second demo</button> <span class="muted" id="step"></span></div>
-</header>
-<main>
-  <section>
-    <div id="answer" aria-live="polite"><span class="muted">Opening your session on Solana devnet…</span></div>
-    <form id="ask">
-      <input id="q" type="text" placeholder="Ask anything" value="Explain how a payment channel works, in about 200 words." disabled>
-      <button class="primary" id="send" disabled>Ask</button>
-    </form>
-    <label class="toggle"><input type="checkbox" id="paying" checked> Keep paying (signs a voucher every 50 tokens)</label>
-  </section>
-  <section>
-    <div class="row"><div>
-      <div class="meter" id="cost">$0.000000</div>
-      <div class="muted" id="tokens">0 tokens paid · 0 vouchers</div>
-    </div><div class="muted" style="text-align:right">Deposit cap<br><b id="cap">$0.25</b></div></div>
-    <div class="muted" style="margin-top:8px">Price: $2 per million tokens. Test USDC on devnet. The wallet's key lives only in this tab.</div>
-    <div id="vouchers"></div>
-    <div class="actions">
-      <button id="over" disabled>Provider tries to take $0.30</button>
-      <button id="settle" class="primary" disabled>Settle</button>
+<nav class="nav" aria-label="Main">
+  <div class="nav__bar">
+    <a class="nav__brand" href="#top">
+      <svg class="app-icon" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="6.3" fill="#2F5BFF"/><path d="M7 10h14M9 10v10M19 10v10M7 20h14" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="14" cy="15" r="2.2" fill="#D4F53C"/></svg>
+      Tollgate
+    </a>
+    <div class="nav__links">
+      <a href="#how">How it works</a>
+      <a href="#proof">On-chain proof</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/kinnuworks/tollgate" target="_blank" rel="noopener">GitHub</a>
     </div>
-    <div id="result"></div>
-    <div class="links" id="links"></div>
-  </section>
-</main>
+    <a class="btn btn-ink btn-sm" href="#top">Try it</a>
+  </div>
+</nav>
+
+<header class="hero hero--color" id="top">
+  <div class="container">
+    <span class="badge badge--dot">Live on Solana devnet</span>
+    <h1>Pay for AI by the token. <span class="t-muted">Stop paying and it stops.</span></h1>
+    <p class="lead">Your browser signs a tiny USDC voucher every 50 tokens. The answer streams only while you keep signing, and one Solana transaction settles exactly what you used.</p>
+    <div class="cta-row">
+      <button class="btn btn-halo btn-lg" id="guided" disabled>Run the 20-second demo</button>
+      <a class="btn btn-outline btn-lg" href="#how">How it works</a>
+    </div>
+    <div class="trust"><span>No wallet or sign-up</span><span>Test USDC on devnet</span><span>Open source</span></div>
+    <span id="step" aria-live="polite"></span>
+
+    <div class="hero__visual bleed">
+      <div class="window">
+        <div class="window__bar"><div class="lights"><i></i><i></i><i></i></div><span class="window__title">Tollgate · Solana devnet</span></div>
+        <div class="app">
+          <div class="app__chat">
+            <div id="answer" aria-live="polite"><span class="t-small">Opening your session on Solana devnet…</span></div>
+            <form id="ask" class="askrow">
+              <input id="q" type="text" aria-label="Your question" placeholder="Ask anything" value="Explain how a payment channel works, in about 200 words." disabled>
+              <button class="btn btn-candy" id="send" disabled>Ask</button>
+            </form>
+            <label class="payrow"><input type="checkbox" class="switch" id="paying" checked> Keep paying <span class="t-micro">(a voucher every 50 tokens)</span></label>
+          </div>
+          <div class="app__side">
+            <div>
+              <div class="meter" id="cost">$0.000000</div>
+              <div class="meter-sub" id="tokens">0 tokens paid · 0 vouchers</div>
+            </div>
+            <div class="capbox"><span>Provider can take at most</span><b id="cap">$0.25</b></div>
+            <div id="vouchers"></div>
+            <div class="actions">
+              <button class="btn btn-outline" id="over" disabled>Provider tries $0.30</button>
+              <button class="btn btn-candy" id="settle" disabled>Settle</button>
+            </div>
+            <div id="result" aria-live="polite"></div>
+            <div class="links" id="links"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="section section--alt after-bleed" id="how">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>How it works</span>
+      <h2>Three signatures and two transactions.</h2>
+      <p class="lead">The wallet lives in your tab. Its key signs the approval, every voucher and the final revoke. The server pays network fees and streams the model's answer.</p>
+    </div>
+    <div class="flow">
+      <div class="tile reveal" style="--i:0">
+        <span class="num">1</span>
+        <div class="t-title" style="margin-top:12px">Open</div>
+        <p>Your tab makes a wallet that receives $0.50 of test USDC. It signs an SPL token approval that lets the AI provider take at most $0.25.</p>
+        <span class="t-mono">mintTo 0.50 · approve(provider, 0.25)</span>
+      </div>
+      <div class="tile reveal" style="--i:1">
+        <span class="num">2</span>
+        <div class="t-title" style="margin-top:12px">Stream</div>
+        <p>Before each block of 50 tokens, the tab signs a voucher for the running total. The gateway checks the signature and won't send text past what the vouchers cover.</p>
+        <span class="t-mono">0x56 0x01 · channel · amount u64 · expiry i64</span>
+      </div>
+      <div class="tile reveal" style="--i:2">
+        <span class="num">3</span>
+        <div class="t-title" style="margin-top:12px">Settle</div>
+        <p>One transaction moves the last signed amount to the provider and revokes its approval. Anything you didn't use stays in your wallet.</p>
+        <span class="t-mono">transferChecked(signed total) · revoke</span>
+      </div>
+    </div>
+    <div class="why">
+      <div class="card card--flat reveal">
+        <div class="t-title">Why Solana</div>
+        <p class="t-small" style="margin-top:6px">An answer costs a fraction of a cent, so settling it has to cost less than the answer. A Solana settlement in this demo confirms in about a second for a fee well under a cent.</p>
+      </div>
+      <div class="card card--flat reveal" style="--i:1">
+        <div class="t-title">Why the provider can't overcharge</div>
+        <p class="t-small" style="margin-top:6px">The token program enforces the $0.25 approval. The demo wallet holds $0.50, so when the provider tries to pull $0.30 the refusal comes from the cap, not from an empty balance.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="proof">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>On-chain proof</span>
+      <h2>Every number here comes from devnet.</h2>
+      <p class="lead">Counted from the provider's token account each time this page loads.</p>
+    </div>
+    <div class="proof">
+      <div class="stat reveal"><div class="stat__num" id="statSessions">…</div><p>sessions settled</p></div>
+      <div class="stat reveal" style="--i:1"><div class="stat__num" id="statRefused">…</div><p>overcharges refused by the token program</p></div>
+      <div class="stat reveal" style="--i:2"><div class="stat__num">≈1 s</div><p>to settle a session (measured in this app)</p></div>
+    </div>
+    <p class="t-small" style="text-align:center;margin-top:20px" id="stats"></p>
+  </div>
+</section>
+
+<section class="section section--alt" id="faq">
+  <div class="container">
+    <div class="section-head"><h2>Questions.</h2></div>
+    <div class="faq">
+      <details><summary>Is this real money?</summary><p>No. Everything runs on Solana devnet with a test USDC token this project minted (6 decimals). The transactions are real devnet transactions, and every one is linked.</p></details>
+      <details><summary>Who holds the wallet's key?</summary><p>Your browser tab. It generates the key, signs the approval, the vouchers and the revoke, and never sends the key anywhere. The server adds only the fee-payer signature and mints test USDC into the wallet.</p></details>
+      <details><summary>What stops the provider from charging more than I signed for?</summary><p>On-chain, the $0.25 approval: the provider can't pull more than that. Below the cap, the gateway settles the amount in your latest signed voucher. Checking each voucher on-chain is what the Solana Foundation's payment-channels program does; we opened a channel on it on devnet, but its payout step failed against devnet's treasury account, so this demo uses token delegation.</p></details>
+      <details><summary>What does the AI do?</summary><p>It answers your question. Anthropic's Claude Haiku model streams the text, the gateway meters it at about 4 characters per token, and the model's own token count appears under the answer when it finishes. You pay in 50-token blocks at $2 per million tokens.</p></details>
+      <details><summary>Can I run it myself?</summary><p>Yes. The code is on GitHub with setup steps in the README: a Node server, a devnet mint you control, and an Anthropic API key.</p></details>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <span>Tollgate · built for the MLH Solana Hackathon, November 2026</span>
+    <span><a href="https://github.com/kinnuworks/tollgate" target="_blank" rel="noopener">GitHub</a></span>
+  </div>
+</footer>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
 <script>
 const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -111,7 +246,7 @@ async function start() {
   try {
     const o = await post('/api/open', { sessionKey });
     S = await post('/api/open/confirm', { id: o.id, signature: signMessage(o.message) });
-    $('answer').innerHTML = '<span class="muted">Session open. This tab made its own wallet, which now holds $0.50 of test USDC. The tab signed an on-chain approval letting the provider take at most $0.25 of it. Ask something.</span>';
+    $('answer').innerHTML = '<span class="t-small">Session open. This tab made its own wallet, which now holds $0.50 of test USDC. The tab signed an on-chain approval letting the provider take at most $0.25 of it. Ask something.</span>';
     $('links').innerHTML = ex(S.openSig, 'Open: fund $0.50 + approve a $0.25 cap ↗');
     ['q', 'send', 'over', 'settle', 'guided'].forEach(i => $(i).disabled = false);
   } catch (e) {
@@ -128,7 +263,7 @@ $('ask').addEventListener('submit', e => {
   e.preventDefault();
   const q = $('q').value.trim(); if (!q || !S) return;
   $('send').disabled = true;
-  $('answer').innerHTML = `<div class="muted">You: ${q.replace(/</g, '&lt;')}</div><div id="out"></div>`;
+  $('answer').innerHTML = `<div class="you">You asked: ${q.replace(/</g, '&lt;')}</div><div id="out"></div>`;
   const es = new EventSource(`/api/chat?id=${S.id}&q=${encodeURIComponent(q)}`);
   es.addEventListener('text', ev => {
     const d = JSON.parse(ev.data); const w = document.querySelector('#answer .wait'); if (w) w.remove();
@@ -137,14 +272,14 @@ $('ask').addEventListener('submit', e => {
   es.addEventListener('pay', async ev => {
     const d = JSON.parse(ev.data);
     if ($('paying').checked) await signAndSend(d.cumulativeAmount, d.cumulativeTokens);
-    else { pendingAsk = d; if (!document.querySelector('#answer .wait')) $('answer').insertAdjacentHTML('beforeend', '<div class="wait">Waiting for payment… (tick "Keep paying" to continue)</div>'); }
+    else { pendingAsk = d; if (!document.querySelector('#answer .wait')) $('answer').insertAdjacentHTML('beforeend', '<div class="wait">Waiting for payment. Turn on Keep paying to continue.</div>'); }
   });
-  es.addEventListener('done', ev => { const d = JSON.parse(ev.data); if (d.modelTokens) $('out').insertAdjacentHTML('afterend', `<div class="muted">Model's own count: ${d.modelTokens} output tokens · paid for ${d.paidTokens} (vouchers cover 50-token blocks)</div>`); es.close(); $('send').disabled = false; });
+  es.addEventListener('done', ev => { const d = JSON.parse(ev.data); if (d.modelTokens) $('out').insertAdjacentHTML('afterend', `<div class="count">Model's own count: ${d.modelTokens} output tokens · paid for ${d.paidTokens} (vouchers cover 50-token blocks)</div>`); es.close(); $('send').disabled = false; });
   es.addEventListener('error', ev => { try { const d = JSON.parse(ev.data); $('answer').insertAdjacentHTML('beforeend', `<div class="bad">${d.message}</div>`); } catch {} es.close(); $('send').disabled = false; });
 });
 
 $('over').addEventListener('click', async () => {
-  $('over').disabled = true; $('result').innerHTML = '<span class="muted">Provider is trying to pull $0.30…</span>';
+  $('over').disabled = true; $('result').innerHTML = '<span class="t-small">Provider is trying to pull $0.30…</span>';
   try {
     const r = await post('/api/overcharge', { id: S.id });
     $('result').innerHTML = r.failed ? '<span class="ok">Refused on-chain. The wallet holds $0.50, but the token program won\'t let the provider take more than the $0.25 you approved.</span>' : '<span class="bad">Unexpected: the transfer went through.</span>';
@@ -154,18 +289,20 @@ $('over').addEventListener('click', async () => {
 });
 
 $('settle').addEventListener('click', async () => {
-  $('settle').disabled = true; $('result').innerHTML = '<span class="muted">Settling on Solana…</span>';
+  $('settle').disabled = true; $('result').innerHTML = '<span class="t-small">Settling on Solana…</span>';
   try {
     const p = await post('/api/settle', { id: S.id });
     const r = await post('/api/settle', { id: S.id, signature: signMessage(p.message) });
     const st = r.settled;
-    $('result').innerHTML = `<b>Paid ${usd(st.paid)} for ${r.paidTokens} tokens · ${usd(st.refunded)} never left your wallet.</b><div class="muted">Settled in ${(st.ms / 1000).toFixed(1)} s. The provider's permission to pull was revoked in the same transaction.</div>`;
+    $('result').innerHTML = `<b>Paid ${usd(st.paid)} for ${r.paidTokens} tokens · ${usd(st.refunded)} never left your wallet.</b><div class="t-small">Settled in ${(st.ms / 1000).toFixed(1)} s. The provider's permission to pull was revoked in the same transaction.</div>`;
     $('links').insertAdjacentHTML('beforeend', ex(st.sig, 'Settle: pull the signed amount + revoke ↗', 'ok'));
     ['q', 'send', 'over', 'guided'].forEach(i => $(i).disabled = true);
   } catch (e) { $('result').innerHTML = `<span class="bad">${e.message}</span>`; $('settle').disabled = false; }
 });
 fetch('/api/stats').then(r => r.json()).then(s => {
-  if (s.settledSessions != null) $('stats').innerHTML = `${s.settledSessions} sessions settled on devnet so far · ${s.refusedOvercharges} overcharges refused · <a target="_blank" rel="noopener" href="https://explorer.solana.com/address/${s.payeeAccount}?cluster=devnet">provider's account ↗</a>`;
+  if (s.settledSessions == null) return;
+  $('statSessions').textContent = s.settledSessions; $('statRefused').textContent = s.refusedOvercharges;
+  $('stats').innerHTML = `<a class="t-accent" target="_blank" rel="noopener" href="https://explorer.solana.com/address/${s.payeeAccount}?cluster=devnet">See the provider's token account on the explorer ↗</a>`;
 }).catch(() => {});
 
 // Guided run: ask, stop paying for a few seconds, resume, overcharge, settle.
@@ -193,6 +330,15 @@ $('guided').addEventListener('click', async () => {
   say('Done. Every step above has an explorer link.');
 });
 start();
+</script>
+<script>
+if('IntersectionObserver' in window){
+  const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{rootMargin:'0px 0px -8% 0px'});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+}else document.querySelectorAll('.reveal').forEach(el=>el.classList.add('in'));
+document.querySelectorAll('.range').forEach(r=>{const f=()=>r.style.setProperty('--val',(r.value-r.min)/(r.max-r.min)*100+'%');r.addEventListener('input',f);f()});
+const nav=document.querySelector('.nav'),hero=document.querySelector('.hero--color');
+if(nav&&hero)new IntersectionObserver(([e])=>nav.classList.toggle('nav--on-color',e.isIntersecting),{rootMargin:'-40px 0px -90% 0px'}).observe(hero);
 </script>
 </body>
 </html>
