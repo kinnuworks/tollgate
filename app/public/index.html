@@ -326,7 +326,7 @@ $('guided').addEventListener('click', async () => {
   say('2/4 · Paying again. The answer carries on.');
   while ($('send').disabled) await sleep(200);
   await sleep(1500);
-  say('3/4 · The provider tries to take $0.30, above the $0.25 it was approved for…');
+  say('3/4 · The provider asks the Tollgate program for $0.30, more than you signed for…');
   $('over').click();
   while (!/Refused|Unexpected|bad/.test($('result').innerHTML)) await sleep(200);
   await sleep(2500);
