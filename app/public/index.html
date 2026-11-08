@@ -233,9 +233,42 @@ const usd = units => '$' + (Number(units) / 1e6).toFixed(6);
 const ex = (sig, label, cls='') => `<a class="${cls}" target="_blank" rel="noopener" href="https://explorer.solana.com/tx/${sig}?cluster=devnet">${label}</a>`;
 const kp = nacl.sign.keyPair();
 // This tab's key owns the wallet: it signs the on-chain approval, the vouchers and the revoke.
+// Before signing, the tab decodes each transaction and checks it against what it agreed to.
+const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', TOLLGATE = '58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj', PDA = '9KhAQuq4X8M5WQCJqdFmCwRLcyHgno4ST6qp7QRycoJp';
+function parseTx(b64) {
+  const m = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); let i = 0;
+  const cu16 = () => { let v = 0, sh = 0; for (;;) { const b = m[i++]; v |= (b & 0x7f) << sh; if (!(b & 0x80)) return v; sh += 7; } };
+  if (m[0] & 0x80) i = 1;
+  i += 3;
+  const keys = []; for (let n = cu16(); n > 0; n--) { keys.push(b58enc(m.slice(i, i + 32))); i += 32; }
+  i += 32;
+  const ixs = []; for (let n = cu16(); n > 0; n--) {
+    const program = keys[m[i++]]; const accts = []; for (let a = cu16(); a > 0; a--) accts.push(keys[m[i++]]);
+    const len = cu16(); const data = m.slice(i, i + len); i += len; ixs.push({ program, accts, data });
+  }
+  return ixs;
+}
+const u64 = (d, at) => Number(new DataView(d.buffer, d.byteOffset).getBigUint64(at, true));
+// kind: 'open' | 'settle'. signedUnits: the tab's last voucher total.
+function checkTx(kind, b64, signedUnits) {
+  const me = sessionKey, lines = []; let ok = true;
+  for (const x of parseTx(b64)) {
+    if (x.program === TOKEN && x.data[0] === 4) {
+      const good = x.accts[1] === PDA && x.accts[2] === me && u64(x.data, 1) <= 250000;
+      lines.push(`${good ? '✓' : '✗'} approve: only the Tollgate program may spend, up to $${(u64(x.data, 1) / 1e6).toFixed(2)}`); ok = ok && good;
+    } else if (x.program === TOKEN && x.data[0] === 5) lines.push('✓ revoke: the program can spend nothing more');
+    else if (x.program === TOKEN && (x.data[0] === 3 || x.data[0] === 12) && x.accts.includes(me)) { lines.push('✗ a transfer signed by this wallet'); ok = false; }
+    else if (x.program === TOLLGATE) {
+      const amt = u64(x.data, 1), good = amt <= signedUnits;
+      lines.push(`${good ? '✓' : '✗'} settle asks for $${(amt / 1e6).toFixed(6)}; you signed for $${(signedUnits / 1e6).toFixed(6)}`); ok = ok && good;
+    }
+  }
+  if (kind === 'open' && !lines.some(l => l.includes('approve'))) { ok = false; lines.push('✗ no approval found'); }
+  return { ok, lines };
+}
 const signMessage = b64 => b58enc(nacl.sign.detached(Uint8Array.from(atob(b64), c => c.charCodeAt(0)), kp.secretKey));
 const sessionKey = b58enc(kp.publicKey);
-let S = null, pendingAsk = null, vouchers = 0;
+let S = null, pendingAsk = null, vouchers = 0, lastSigned = 0;
 
 async function post(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -246,6 +279,7 @@ async function signAndSend(cumulativeAmount, cumulativeTokens) {
   const sig = nacl.sign.detached(voucherBytes(S.payer, cumulativeAmount, expiresAt), kp.secretKey);
   const signature = b58enc(sig);
   const r = await post('/api/voucher', { id: S.id, cumulativeAmount, expiresAt, signature });
+  lastSigned = cumulativeAmount;
   vouchers++;
   $('cost').textContent = usd(cumulativeAmount);
   $('tokens').textContent = `${r.paidTokens} tokens paid · ${vouchers} vouchers`;
@@ -255,9 +289,13 @@ async function signAndSend(cumulativeAmount, cumulativeTokens) {
 async function start() {
   try {
     const o = await post('/api/open', { sessionKey });
+    const c = checkTx('open', o.message, 0);
+    if (!c.ok) throw new Error('this tab refused to sign the open transaction: ' + c.lines.join('; '));
     S = await post('/api/open/confirm', { id: o.id, signature: signMessage(o.message) });
+    S.checks = c.lines;
     $('answer').innerHTML = '<span class="t-small">Session open. This tab made its own wallet, which now holds $0.50 of ' + (S.realUsdc ? 'Circle devnet USDC' : 'test USDC') + '. The tab approved the Tollgate program to spend at most $0.25 of it, and only against vouchers the tab signs. Ask something.</span>';
     $('links').innerHTML = ex(S.openSig, 'Open: fund $0.50 + approve the program for $0.25 ↗');
+    $('result').innerHTML = `<div class="t-small"><b>Checked by this tab before signing:</b><br>${S.checks.join('<br>')}</div>`;
     ['q', 'send', 'over', 'settle', 'guided', 'agentBtn'].forEach(i => $(i).disabled = false);
   } catch (e) {
     $('answer').innerHTML = `<span class="bad">Could not open a session: ${e.message}. Devnet may be busy; reload to try again.</span>`;
@@ -301,6 +339,9 @@ $('over').addEventListener('click', async () => {
   $('over').disabled = true; $('result').innerHTML = '<span class="t-small">Provider is trying to pull $0.30…</span>';
   try {
     const p = await post('/api/overcharge', { id: S.id });
+    const c = checkTx('settle', p.message, Number(lastSigned));
+    $('result').innerHTML = `<div class="t-small"><b>This tab's check:</b> ${c.lines.join('<br>')}<br>It signs anyway, only for this demo, to show the program refuses too.</div>`;
+    await sleep(1200);
     const r = await post('/api/overcharge', { id: S.id, signature: signMessage(p.message) });
     $('result').innerHTML = r.failed ? '<span class="ok">Refused on-chain by the Tollgate program (error 1: above your signed voucher). Your tab even co-signed the $0.30 settle, and the program still paid nothing.</span>' : '<span class="bad">Unexpected: the transfer went through.</span>';
     if (r.sig) $('links').insertAdjacentHTML('beforeend', ex(r.sig, 'Refused overcharge: Tollgate program error 1 ↗', 'bad'));
@@ -312,9 +353,12 @@ $('settle').addEventListener('click', async () => {
   $('settle').disabled = true; $('result').innerHTML = '<span class="t-small">Settling on Solana…</span>';
   try {
     const p = await post('/api/settle', { id: S.id });
+    const c = checkTx('settle', p.message, Number(lastSigned));
+    if (!c.ok) throw new Error('this tab refused to sign the settle: ' + c.lines.join('; '));
     const r = await post('/api/settle', { id: S.id, signature: signMessage(p.message) });
+    r.checks = c.lines;
     const st = r.settled;
-    $('result').innerHTML = `<b>Paid ${usd(st.paid)} for ${r.paidTokens} tokens · ${usd(st.refunded)} never left your wallet.</b><div class="t-small">The Tollgate program checked your signed voucher on-chain. Settled in ${(st.ms / 1000).toFixed(1)} s. The provider's permission to pull was revoked in the same transaction.</div>`;
+    $('result').innerHTML = `<b>Paid ${usd(st.paid)} for ${r.paidTokens} tokens · ${usd(st.refunded)} never left your wallet.</b><div class="t-small">Checked by this tab before signing: ${r.checks.join(' · ')}<br>The Tollgate program checked your signed voucher on-chain. Settled in ${(st.ms / 1000).toFixed(1)} s. The provider's permission to pull was revoked in the same transaction.</div>`;
     $('links').insertAdjacentHTML('beforeend', ex(st.sig, 'Settle: voucher checked on-chain, paid + revoked ↗', 'ok'));
     ['q', 'send', 'over', 'guided', 'agentBtn'].forEach(i => $(i).disabled = true);
   } catch (e) { $('result').innerHTML = `<span class="bad">${e.message}</span>`; $('settle').disabled = false; }

@@ -18,6 +18,7 @@ use pinocchio::{
     error::ProgramError,
     AccountView, Address, ProgramResult,
 };
+use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio_token::instructions::TransferChecked;
 
 entrypoint!(process_instruction);
@@ -43,6 +44,8 @@ enum TollgateError {
     BadInput = 5,
     /// The payer did not sign this settle, so nobody else can replay a voucher.
     PayerMustSign = 6,
+    /// Every voucher the payer signed in this transaction has expired.
+    VoucherExpired = 7,
 }
 
 fn err(e: TollgateError) -> ProgramError {
@@ -88,7 +91,12 @@ pub fn process_instruction(_program_id: &Address, accounts: &mut [AccountView], 
     // Find the largest amount the payer signed for, across Ed25519 checks in this transaction.
     let signed = {
         let sysvar = ix_sysvar.try_borrow()?;
-        max_signed_amount(&sysvar, &owner_key).ok_or(err(TollgateError::NoSignedVoucher))?
+        let now = Clock::get()?.unix_timestamp;
+        match max_signed_amount(&sysvar, &owner_key, now) {
+            Signed::Found(a) => a,
+            Signed::AllExpired => return Err(err(TollgateError::VoucherExpired)),
+            Signed::None => return Err(err(TollgateError::NoSignedVoucher)),
+        }
     };
     if amount > signed {
         return Err(err(TollgateError::AboveSignedVoucher));
@@ -104,7 +112,19 @@ pub fn process_instruction(_program_id: &Address, accounts: &mut [AccountView], 
 /// signature, key and message all live inside that same instruction (offset
 /// index 0xFFFF), checks the key is the payer and the message is a voucher for
 /// the payer's channel, and returns the largest signed amount.
-fn max_signed_amount(sysvar: &[u8], owner: &[u8; 32]) -> Option<u64> {
+#[derive(Debug, PartialEq)]
+pub enum Signed { Found(u64), AllExpired, None }
+
+pub fn max_signed_amount(sysvar: &[u8], owner: &[u8; 32], now: i64) -> Signed {
+    let mut expired = false;
+    match scan(sysvar, owner, now, &mut expired) {
+        Some(a) => Signed::Found(a),
+        None if expired => Signed::AllExpired,
+        None => Signed::None,
+    }
+}
+
+fn scan(sysvar: &[u8], owner: &[u8; 32], now: i64, expired: &mut bool) -> Option<u64> {
     let n = u16_at(sysvar, 0)? as usize;
     let mut best: Option<u64> = None;
     for i in 0..n {
@@ -136,6 +156,11 @@ fn max_signed_amount(sysvar: &[u8], owner: &[u8; 32]) -> Option<u64> {
                 continue;
             }
             let amt = u64::from_le_bytes(msg[34..42].try_into().ok()?);
+            let expires_at = i64::from_le_bytes(msg[42..50].try_into().ok()?);
+            if expires_at < now {
+                *expired = true;
+                continue;
+            }
             best = Some(best.map_or(amt, |b| if amt > b { amt } else { b }));
         }
     }
@@ -171,4 +196,59 @@ const fn decode_b58(s: &[u8]) -> [u8; 32] {
         i += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds an instructions-sysvar buffer holding one Ed25519 instruction with the given voucher.
+    fn sysvar_with(owner: &[u8; 32], channel: &[u8; 32], amount: u64, expires_at: i64, inline: bool) -> [u8; 512] {
+        let mut msg = [0u8; 50];
+        msg[0] = 0x56; msg[1] = 0x01; msg[2..34].copy_from_slice(channel);
+        msg[34..42].copy_from_slice(&amount.to_le_bytes()); msg[42..50].copy_from_slice(&expires_at.to_le_bytes());
+        let mut data = [0u8; 162];
+        data[0] = 1;
+        let idx: u16 = if inline { u16::MAX } else { 0 };
+        let put = |d: &mut [u8; 162], at: usize, v: u16| d[at..at + 2].copy_from_slice(&v.to_le_bytes());
+        put(&mut data, 2, 48); put(&mut data, 4, idx); put(&mut data, 6, 16); put(&mut data, 8, idx);
+        put(&mut data, 10, 112); put(&mut data, 12, 50); put(&mut data, 14, idx);
+        data[16..48].copy_from_slice(owner); data[112..162].copy_from_slice(&msg);
+        let mut b = [0u8; 512];
+        b[0..2].copy_from_slice(&1u16.to_le_bytes());
+        let start = 4u16; b[2..4].copy_from_slice(&start.to_le_bytes());
+        let s = start as usize;
+        b[s..s + 2].copy_from_slice(&0u16.to_le_bytes()); // no accounts
+        b[s + 2..s + 34].copy_from_slice(&ED25519_PROGRAM);
+        b[s + 34..s + 36].copy_from_slice(&(data.len() as u16).to_le_bytes());
+        b[s + 36..s + 36 + data.len()].copy_from_slice(&data);
+        b
+    }
+
+    const OWNER: [u8; 32] = [7u8; 32];
+
+    #[test]
+    fn reads_the_signed_amount() {
+        assert_eq!(max_signed_amount(&sysvar_with(&OWNER, &OWNER, 700, 2_000, true), &OWNER, 1_000), Signed::Found(700));
+    }
+    #[test]
+    fn ignores_a_voucher_from_another_signer() {
+        assert_eq!(max_signed_amount(&sysvar_with(&[9u8; 32], &OWNER, 700, 2_000, true), &OWNER, 1_000), Signed::None);
+    }
+    #[test]
+    fn ignores_a_voucher_for_another_channel() {
+        assert_eq!(max_signed_amount(&sysvar_with(&OWNER, &[9u8; 32], 700, 2_000, true), &OWNER, 1_000), Signed::None);
+    }
+    #[test]
+    fn ignores_data_pointing_outside_the_ed25519_instruction() {
+        assert_eq!(max_signed_amount(&sysvar_with(&OWNER, &OWNER, 700, 2_000, false), &OWNER, 1_000), Signed::None);
+    }
+    #[test]
+    fn reports_an_expired_voucher() {
+        assert_eq!(max_signed_amount(&sysvar_with(&OWNER, &OWNER, 700, 999, true), &OWNER, 1_000), Signed::AllExpired);
+    }
+    #[test]
+    fn decodes_the_provider_address() {
+        assert_eq!(decode_b58(b"11111111111111111111111111111111"), [0u8; 32]);
+    }
 }
