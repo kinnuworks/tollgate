@@ -63,7 +63,7 @@ app.post('/api/voucher', (req, res) => {
   if (amount > DEPOSIT) return res.status(400).json({ error: 'voucher is above the deposit' });
   s.paidAmount = amount;
   s.paidTokens = Number(amount / UNITS_PER_TOKEN);
-  s.vouchers.push({ amount: amount.toString(), signature: req.body.signature, at: Date.now() });
+  s.vouchers.push({ amount: amount.toString(), expiresAt, signature: req.body.signature, at: Date.now() });
   s.waiters.splice(0).forEach(w => w());
   res.json({ ok: true, paidTokens: s.paidTokens });
 });
@@ -143,7 +143,7 @@ app.post('/api/open/confirm', async (req, res) => {
 app.post('/api/overcharge', async (req, res) => {
   const s = sessions.get(req.body.id);
   if (!s) return res.status(404).json({ error: 'no session' });
-  try { res.json(await tryOvercharge(s.payerAddress)); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  try { res.json(await tryOvercharge(s.payerAddress, s.vouchers.at(-1))); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 
 app.post('/api/settle', async (req, res) => {
@@ -152,7 +152,7 @@ app.post('/api/settle', async (req, res) => {
   if (s.settled) return res.json(pub(s));
   try {
     if (!req.body.signature) {
-      const { tx, message } = await prepareSettle(s.payerAddress, s.paidAmount);
+      const { tx, message } = await prepareSettle(s.payerAddress, s.paidAmount, s.vouchers.at(-1));
       s.pendingSettle = tx;
       return res.json({ message, amount: s.paidAmount.toString() });
     }

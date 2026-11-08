@@ -11,7 +11,9 @@ import {
   setTransactionMessageLifetimeUsingBlockhash, appendTransactionMessageInstructions,
   signTransactionMessageWithSigners, getBase64EncodedWireTransaction, getSignatureFromTransaction,
   createNoopSigner, partiallySignTransactionMessageWithSigners, getBase64Decoder,
+  getProgramDerivedAddress, AccountRole, getBase58Encoder,
 } from '@solana/kit';
+import { encodeVoucherMessageBytes } from '@solana/mpp/server';
 import {
   findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync,
   getMintToInstruction, getApproveInstruction, getTransferCheckedInstruction,
@@ -103,28 +105,61 @@ export async function submitWithPayerSignature(tx, payerAddress, signatureBytes)
   return { sig, ms: await timed(() => confirm(sig)) };
 }
 
+export const PROGRAM_ID = address(process.env.PROGRAM_ID || '58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj');
+const ED25519_PROGRAM = address('Ed25519SigVerify111111111111111111111111111');
+const INSTRUCTIONS_SYSVAR = address('Sysvar1nstructions1111111111111111111111111');
+const pdaP = getProgramDerivedAddress({ programAddress: PROGRAM_ID, seeds: ['tollgate'] });
+const b58 = getBase58Encoder();
+
+// The tab approves the Tollgate program's PDA (not the provider) to spend at most the cap.
 export async function prepareOpen(payerAddress) {
   const operator = await operatorP;
-  const payee = await payeeP;
+  const [pda] = await pdaP;
   const owner = createNoopSigner(address(payerAddress));
   const payerAta = await ata(owner.address);
   return prepare([
     await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: owner.address, mint: MINT }),
     getMintToInstruction({ mint: MINT, token: payerAta, mintAuthority: operator, amount: FUNDING }),
-    getApproveInstruction({ source: payerAta, delegate: payee.address, owner, amount: DEPOSIT }),
+    getApproveInstruction({ source: payerAta, delegate: pda, owner, amount: DEPOSIT }),
   ]);
 }
 
-export async function prepareSettle(payerAddress, amount) {
-  const payee = await payeeP;
-  const owner = createNoopSigner(address(payerAddress));
+// Ed25519 precompile instruction that verifies the tab's voucher signature in-transaction.
+function ed25519Ix(pubkeyB58, sigB58, message) {
+  const pk = b58.encode(pubkeyB58), sig = b58.encode(sigB58);
+  const data = new Uint8Array(16 + 32 + 64 + message.length);
+  const dv = new DataView(data.buffer);
+  data[0] = 1; data[1] = 0;
+  dv.setUint16(2, 48, true); dv.setUint16(4, 0xffff, true);   // signature offset / ix index
+  dv.setUint16(6, 16, true); dv.setUint16(8, 0xffff, true);   // public key offset / ix index
+  dv.setUint16(10, 112, true); dv.setUint16(12, message.length, true); dv.setUint16(14, 0xffff, true);
+  data.set(pk, 16); data.set(sig, 48); data.set(message, 112);
+  return { programAddress: ED25519_PROGRAM, accounts: [], data };
+}
+
+async function settleIxs(payerAddress, amount, voucher) {
+  const [pda, bump] = await pdaP;
   const { ix, payeeAta } = await ensurePayeeAta();
-  const ixs = [ix];
-  if (amount > 0n) {
-    ixs.push(getTransferCheckedInstruction({
-      source: await ata(owner.address), mint: MINT, destination: payeeAta, authority: payee, amount, decimals: DECIMALS,
-    }));
-  }
+  const owner = address(payerAddress);
+  const data = new Uint8Array(11); const dv = new DataView(data.buffer);
+  data[0] = 1; dv.setBigUint64(1, BigInt(amount), true); data[9] = DECIMALS; data[10] = bump;
+  return [ix,
+    ed25519Ix(payerAddress, voucher.signature, encodeVoucherMessageBytes({ channelId: payerAddress, cumulativeAmount: BigInt(voucher.amount), expiresAt: BigInt(voucher.expiresAt) })),
+    { programAddress: PROGRAM_ID, data, accounts: [
+      { address: await ata(owner), role: AccountRole.WRITABLE },
+      { address: MINT, role: AccountRole.READONLY },
+      { address: payeeAta, role: AccountRole.WRITABLE },
+      { address: pda, role: AccountRole.READONLY },
+      { address: owner, role: AccountRole.READONLY },
+      { address: INSTRUCTIONS_SYSVAR, role: AccountRole.READONLY },
+      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    ] }];
+}
+
+// Settle: Tollgate checks the voucher on-chain and pays at most the signed amount; the tab signs the revoke.
+export async function prepareSettle(payerAddress, amount, voucher) {
+  const owner = createNoopSigner(address(payerAddress));
+  const ixs = amount > 0n && voucher ? await settleIxs(payerAddress, amount, voucher) : [];
   ixs.push(getRevokeInstruction({ source: await ata(owner.address), owner }));
   return prepare(ixs);
 }
@@ -135,23 +170,18 @@ async function ensurePayeeAta() {
   return { ix: await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: payee.address, mint: MINT }), payeeAta: await ata(payee.address) };
 }
 
-// The provider tries to pull more than the on-chain cap. The token program refuses.
-export async function tryOvercharge(payerAddress) {
+// The provider asks the Tollgate program for $0.30 against the tab's latest voucher. The program refuses.
+export async function tryOvercharge(payerAddress, voucher) {
   const operator = await operatorP;
-  const payee = await payeeP;
-  const { ix, payeeAta } = await ensurePayeeAta();
   const amount = DEPOSIT + 50_000n;
+  const v = voucher || { amount: '0', expiresAt: 0, signature: '1111111111111111111111111111111111111111111111111111111111111111' };
   try {
-    const r = await send(operator, [ix, getTransferCheckedInstruction({
-      source: await ata(address(payerAddress)), mint: MINT, destination: payeeAta, authority: payee, amount, decimals: DECIMALS,
-    })], { skipPreflight: true });
+    const r = await send(operator, await settleIxs(payerAddress, amount, v), { skipPreflight: true });
     return { sig: r.sig, failed: false, amount: amount.toString() };
   } catch (e) {
-    const sig = e.sig;
-    return { failed: true, error: e.chainErr || e.message, amount: amount.toString(), sig };
+    return { failed: true, error: e.chainErr || e.message, amount: amount.toString(), sig: e.sig };
   }
 }
-
 
 // Public proof of use: successful payouts into the provider's token account.
 let statsCache = { at: 0, value: null };

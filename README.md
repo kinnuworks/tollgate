@@ -2,7 +2,7 @@
 
 Pay for AI by the token in USDC on Solana. Stop paying and the answer stops. Whatever you don't use never leaves your wallet.
 
-Why Solana: paying a fraction of a cent per answer only works if settling costs less than the answer. On Solana the whole session settles in one transaction in about a second, for well under a cent.
+Why Solana: paying a fraction of a cent per answer only works if settling costs less than the answer. On Solana the whole session settles in one transaction in about a second, for well under a cent, and a small on-chain program checks the signed voucher before any money moves.
 
 **Live demo (devnet):** https://tollgate-production-6271.up.railway.app
 
@@ -14,38 +14,41 @@ Why Solana: paying a fraction of a cent per answer only works if settling costs 
 
 Open the link and press **Run the 20-second demo**. It does the steps below on its own, with an explorer link for each one. To do it by hand:
 
-1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.50 of test USDC, and the AI provider is approved on-chain to take at most $0.25 of it.
+1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.50 of test USDC and approves the Tollgate program to spend at most $0.25 of it.
 2. Click **Ask**. The answer streams in while the tab signs a payment voucher every 50 tokens. The meter shows what you've paid so far.
 3. Untick **Keep paying** while it's answering. The text stops with "Waiting for payment…". Tick it again and it carries on.
-4. Click **Provider tries to take $0.30**. The token program refuses it on-chain, and you get the failed transaction's link.
-5. Click **Settle**. One transaction moves exactly the amount you signed for to the provider and removes the provider's permission. The rest never left your wallet. You get explorer links for every step.
+4. Click **Provider tries $0.30**. The Tollgate program refuses it on-chain (error 1: above your signed voucher), and you get the failed transaction's link.
+5. Click **Settle**. One transaction checks your voucher on-chain, pays the provider exactly the signed amount and revokes the approval. The rest never left your wallet. You get explorer links for every step.
 
 ## How it works
 
 ```
 browser tab                         gateway (Node)                      Solana devnet
 -----------                         --------------                      -------------
-makes its own wallet key   ───────► open: tab signs approve          ──► mint $0.50 + approve(provider, cap $0.25)
+makes its own wallet key   ───────► open: tab signs approve          ──► mint $0.50 + approve(Tollgate PDA, cap $0.25)
                                     stream AI answer, 50 tokens
 ◄── "pay up to N tokens"            at a time; waits for a voucher
-signs voucher (amount, expiry) ───► checks the signature against the
-                                    tab's key, releases the next block
-                                    settle: tab signs revoke        ───► transferChecked + revoke, one tx
+signs voucher (amount, expiry) ───► checks the signature, releases
+                                    the next block
+                                    settle: tab signs revoke        ───► ed25519 verify(voucher)
+                                                                         tollgate.settle(amount ≤ signed)
+                                                                         revoke
 ```
 
-- **Vouchers.** Each voucher is the 50-byte format used by the Solana Foundation's payment channels (`0x56 0x01 · channel id · cumulative amount u64 · expiry i64`), signed with the tab's own ed25519 key. The gateway won't stream past what the latest voucher covers.
-- **On-chain cap.** At open, a fresh wallet gets $0.50 of test USDC and approves the provider as an SPL token delegate for $0.25. The provider can't take more than that. The "take $0.30" button proves it with a real failed transaction.
-- **Settle.** One transaction transfers the last signed total to the provider and revokes the approval.
-- **Price.** $2 per million tokens (2 base units of 6-decimal USDC per token).
+- **Vouchers.** Each voucher is the 50-byte format the Solana Foundation's payment channels use (`0x56 0x01 · channel id · cumulative amount u64 · expiry i64`). The tab signs it with its own ed25519 key. The gateway won't stream past what the latest voucher covers.
+- **Tollgate program** ([`program/src/lib.rs`](program/src/lib.rs), devnet [`58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj`](https://explorer.solana.com/address/58S2R4oQRDYts3qXK6PYwq9SwZg1oPnLGvYRdbxpFNWj?cluster=devnet)). A 20 KB Pinocchio program with one instruction, `settle`. It reads the instructions sysvar, finds the Ed25519 check of a voucher signed by this payer for this payer's channel, and pays the provider at most the signed amount from the payer's token account, signing as its PDA. It refuses a different payer, a different provider, a missing voucher, or an amount above the voucher (error 1).
+- **On-chain cap.** At open, the tab's wallet approves the program's PDA (not the provider) as a token delegate for $0.25, so the total can never pass that either.
+- **Settle.** One transaction: Ed25519 verify, `tollgate.settle`, and the tab's revoke.
+- **Price.** $2 per million tokens (2 base units of 6-decimal USDC per token), paid in 50-token blocks.
 
 ## What is real and what isn't
 
 - Every transaction is real and on Solana devnet. The USDC is a test token this project minted on devnet ("test USDC", 6 decimals). It is not Circle's USDC.
-- Your browser tab makes its own wallet. Its key never leaves the tab, and it signs the on-chain approval, every voucher and the revoke at settle. The server only pays network fees and mints test USDC into the wallet, so you don't need a wallet extension.
-- The token count during streaming is an estimate (about 4 characters per token). The model's own count is shown under the answer when it ends. You pay in 50-token blocks.
-- The voucher limit is enforced by the gateway. The chain enforces the $0.25 cap (the demo wallet holds $0.50, so the refused $0.30 pull fails because of the cap, not the balance) and the final transfer. A dishonest provider could pull up to the cap, not more.
-- Settling against a signed voucher on-chain is the job of the Solana Foundation's payment-channels program. We opened a channel on it on devnet with this same voucher format ([open transaction](https://explorer.solana.com/tx/5NtC5ZKkgZqm4gMSPJFh9cGHACmUeKDLKiKuW2NJ1qaReur1KZ3EDREZktxcV1MGcz6KNx2AmGS39nsr3QSrzhgx?cluster=devnet)). Its settle-and-payout transaction failed on devnet's treasury account check (`TreasuryAccountMismatch`), so the demo moves money with SPL token delegation instead.
-- One provider (this project) and one model.
+- Your browser tab makes its own wallet. Its key never leaves the tab, and it signs the on-chain approval, every voucher and the revoke at settle. The server only pays network fees and mints test USDC into the wallet, so you don't need a wallet extension. The key lives in page memory, so a reload starts a new wallet.
+- The token count during streaming is an estimate (about 4 characters per token). The model's own count is shown under the answer when it ends.
+- The gateway decides when to stop streaming; the chain decides how much can be paid. The settle amount is checked on-chain against the signed voucher.
+- We first tried the Solana Foundation's payment-channels program on devnet and opened a channel on it ([open transaction](https://explorer.solana.com/tx/5NtC5ZKkgZqm4gMSPJFh9cGHACmUeKDLKiKuW2NJ1qaReur1KZ3EDREZktxcV1MGcz6KNx2AmGS39nsr3QSrzhgx?cluster=devnet)). Its payout step failed on devnet's treasury account check (`TreasuryAccountMismatch`), so we wrote the small settle program above instead, keeping the same voucher format.
+- One provider (this project) and one model (Anthropic's Claude Haiku).
 
 ## Run it locally
 
