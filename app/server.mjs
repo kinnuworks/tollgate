@@ -100,7 +100,8 @@ app.get('/api/chat', async (req, res) => {
   let answer = '';
   let lastAsk = -1;
   while (!closed) {
-    const allowedChars = s.paidTokens * CHARS_PER_TOKEN;
+    // Only what was paid for since this answer started counts toward this answer.
+    const allowedChars = Math.max(0, s.paidTokens - (s.tokensBefore || 0)) * CHARS_PER_TOKEN;
     const available = buffer.length;
     if (sentChars < available && sentChars < allowedChars) {
       const chunk = buffer.slice(sentChars, Math.min(available, allowedChars, sentChars + 8));
@@ -134,7 +135,7 @@ app.get('/api/chat', async (req, res) => {
       while (!closed && s.paidTokens < need && Date.now() - t0 < 6000) await new Promise(r => { s.waiters.push(r); setTimeout(r, 500); });
     }
   }
-  s.tokensBefore = s.tokens;
+  s.tokensBefore = Math.max(s.tokens, s.paidTokens); // next answer starts from everything already paid for
   s.history.push({ role: 'assistant', content: answer || '…' });
   send('done', { tokens: s.tokens, modelTokens: finalTokens, paidTokens: s.paidTokens, paidAmount: s.paidAmount.toString() });
   res.end();
