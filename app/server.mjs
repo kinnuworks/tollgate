@@ -83,7 +83,7 @@ app.get('/api/chat', async (req, res) => {
   s.history.push({ role: 'user', content: String(req.query.q || '').slice(0, 2000) });
   (async () => {
     try {
-      const stream = ai.messages.stream({ model: MODEL, max_tokens: 700, messages: s.history,
+      const stream = ai.messages.stream({ model: MODEL, max_tokens: 1200, thinking: { type: 'disabled' }, messages: s.history,
         system: 'Answer clearly and helpfully in plain prose. No markdown headings.' });
       stream.on('text', t => { buffer += t; });
       const final = await stream.finalMessage();
