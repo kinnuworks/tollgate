@@ -6,6 +6,10 @@ Why Solana: paying a fraction of a cent per answer only works if settling costs 
 
 **Live demo (devnet):** https://tollgate-production-6271.up.railway.app
 
+| Stop paying: the answer waits | Settle: paid for 350 tokens, the rest never left the wallet |
+|---|---|
+| ![Answer paused while unpaid](docs/paused.jpg) | ![Settled with explorer links](docs/settled.jpg) |
+
 ## Try it in 30 seconds
 
 Open the link and press **Run the 60-second demo**. It does the steps below on its own, with an explorer link for each one. To do it by hand:
