@@ -12,9 +12,11 @@ Why Solana: paying a fraction of a cent per answer only works if settling costs 
 
 ## Try it in 30 seconds
 
+Demo video: https://youtu.be/XxHqkIbsHrI
+
 Open the link and press **Run the 20-second demo**. It does the steps below on its own, with an explorer link for each one. To do it by hand:
 
-1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.50 of test USDC and approves the Tollgate program to spend at most $0.25 of it.
+1. Open the link. The page opens a session for you on Solana devnet: a fresh wallet gets $0.50 of Circle devnet USDC (or a test token once our faucet balance runs out) and approves the Tollgate program to spend at most $0.25 of it.
 2. Click **Ask**. The answer streams in while the tab signs a payment voucher every 50 tokens. The meter shows what you've paid so far.
 3. Untick **Keep paying** while it's answering. The text stops with "Waiting for payment…". Tick it again and it carries on.
 4. Click **Provider tries $0.30**. Your tab co-signs a $0.30 settle, and the Tollgate program still refuses it on-chain (error 1: above your signed voucher). You get the failed transaction's link.
@@ -64,7 +66,7 @@ signs voucher (amount, expiry) ───► checks the signature, releases
 - **Your tab checks before it signs.** The page decodes every transaction the server builds before the tab signs it: the approval must go only to the Tollgate program and be at most $0.25, and a settle must ask for no more than the tab's last voucher. It shows what it checked.
 - **On-chain cap.** At open, the tab's wallet approves the program's PDA (not the provider) as a token delegate for $0.25, so the total can never pass that either.
 - **Settle.** One transaction: Ed25519 verify, `tollgate.settle`, and the tab's revoke.
-- **Price.** $2 per million tokens (2 base units of 6-decimal USDC per token), paid in 50-token blocks.
+- **Price.** Claude Haiku $2 and Claude Sonnet $6 per million tokens, paid in 50-token blocks.
 
 ## What is real and what isn't
 
