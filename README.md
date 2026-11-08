@@ -20,6 +20,10 @@ Open the link and press **Run the 20-second demo**. It does the steps below on i
 4. Click **Provider tries $0.30**. Your tab co-signs a $0.30 settle, and the Tollgate program still refuses it on-chain (error 1: above your signed voucher). You get the failed transaction's link.
 5. Click **Settle**. One transaction checks your voucher on-chain, pays the provider exactly the signed amount and revokes the approval. The rest never left your wallet. You get explorer links for every step.
 
+## Agent mode
+
+Press **Let an AI agent buy an answer**. The tab's wallet now belongs to a buying agent with a task ("learn what a payment channel is; one clear sentence is enough"). Before signing each next voucher, the agent (Claude Haiku) reads the answer so far and decides whether it already has what the task needs. When it does, it stops paying, the stream halts, and it settles on its own. In our test run it bought 50 tokens of a roughly 400-token answer and paid $0.000100. The page shows each of the agent's decisions and its reason.
+
 ## How it works
 
 ```

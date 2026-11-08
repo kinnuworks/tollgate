@@ -141,6 +141,28 @@ app.post('/api/open/confirm', async (req, res) => {
   }
 });
 
+// Agent mode: before each next voucher, a buying agent reads the answer so far and decides
+// whether it already has what its task needs. If it does, it stops paying.
+app.post('/api/agent/decide', async (req, res) => {
+  const s = sessions.get(req.body.id);
+  if (!s) return res.status(404).json({ error: 'no session' });
+  const task = String(req.body.task || '').slice(0, 300);
+  const text = String(req.body.text || '').slice(0, 4000);
+  try {
+    const m = await ai.messages.create({
+      model: MODEL, max_tokens: 120, thinking: { type: 'disabled' },
+      system: 'You are a buying agent. You pay per token for an AI answer and want to spend as little as possible. Decide if the answer so far already contains what your task needs. Reply with JSON only: {"enough": true|false, "why": "<at most 12 words>"}',
+      messages: [{ role: 'user', content: `Task: ${task}\n\nAnswer so far:\n${text}` }],
+    });
+    const raw = m.content.map(c => c.text || '').join('');
+    const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+    s.agentLog = (s.agentLog || []).concat({ at: Date.now(), enough: !!j.enough, why: String(j.why || '').slice(0, 120) });
+    res.json({ enough: !!j.enough, why: String(j.why || '').slice(0, 120) });
+  } catch (e) {
+    res.json({ enough: false, why: 'could not decide, keeps paying' });
+  }
+});
+
 app.post('/api/overcharge', async (req, res) => {
   const s = sessions.get(req.body.id);
   if (!s) return res.status(404).json({ error: 'no session' });

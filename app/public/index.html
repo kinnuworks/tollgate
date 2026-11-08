@@ -36,6 +36,9 @@
   #vouchers div{display:flex;gap:8px;align-items:center}
   #vouchers div::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}
   .actions{display:flex;gap:8px;flex-wrap:wrap}
+  .agentlog{padding:10px 12px;border-radius:var(--r-md);background:#F2F7EA;box-shadow:inset 0 0 0 1px #DCEBC4;font-size:13px;line-height:1.5;color:#33461A;max-height:120px;overflow:auto}
+  .agentlog b{font-weight:650}
+  .agentlog div+div{margin-top:4px}
   .actions .btn{--h:40px;flex:1;padding:0 14px;font-size:14px}
   .btn:disabled{opacity:.45;cursor:default;transform:none}
   .hero--color .window .btn-outline{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
@@ -91,8 +94,8 @@
     <p class="lead">Your browser signs a tiny USDC voucher every 50 tokens. The answer streams only while you keep signing, and one Solana transaction settles exactly what you used.</p>
     <div class="cta-row">
       <button class="btn btn-halo btn-lg" id="guided" disabled>Run the 20-second demo</button>
-      <a class="btn btn-outline btn-lg" href="#how">How it works</a>
-    </div>
+      <button class="btn btn-outline btn-lg" id="agentBtn" disabled>Let an AI agent buy an answer</button>
+          </div>
     <div class="trust"><span>No wallet or sign-up</span><span>Test USDC on devnet</span><span>Open source</span></div>
     <span id="step" aria-live="polite"></span>
 
@@ -114,6 +117,7 @@
               <div class="meter-sub" id="tokens">0 tokens paid · 0 vouchers</div>
             </div>
             <div class="capbox"><span>Program can pay out at most</span><b id="cap">$0.25</b></div>
+            <div id="agentlog" class="agentlog" hidden></div>
             <div id="vouchers"></div>
             <div class="actions">
               <button class="btn btn-outline" id="over" disabled>Provider tries $0.30</button>
@@ -191,7 +195,7 @@
       <details><summary>Is this real money?</summary><p>No. Everything runs on Solana devnet. Sessions are funded with Circle's devnet USDC while our faucet balance lasts, and with a test token this project minted (6 decimals) after that; the page says which one your session got. The transactions are real devnet transactions, and every one is linked.</p></details>
       <details><summary>Who holds the wallet's key?</summary><p>Your browser tab. It generates the key, signs the approval, the vouchers and the revoke, and never sends the key anywhere. The server adds only the fee-payer signature and mints test USDC into the wallet.</p></details>
       <details><summary>What stops the provider from charging more than I signed for?</summary><p>The Tollgate program. Your tab approves it, not the provider, as the spender. At settle it needs your tab's signature, reads your voucher from Solana's Ed25519 signature check in the same transaction, and pays at most the signed amount. Anything more fails with error 1, even when your tab co-signs it, and a settle your tab didn't sign fails with error 6. The approval also caps the total at $0.25. The voucher format is the one the Solana Foundation's payment channels use.</p></details>
-      <details><summary>What does the AI do?</summary><p>It answers your question. Anthropic's Claude Haiku model streams the text, the gateway meters it at about 4 characters per token, and the model's own token count appears under the answer when it finishes. You pay in 50-token blocks at $2 per million tokens.</p></details>
+      <details><summary>What does the AI do?</summary><p>Two jobs. In agent mode, an AI agent holds the wallet in your tab and decides, before each 50-token voucher, whether the answer already has what its task needs; when it does, it stops paying and settles. In every mode, a model answers your question. Anthropic's Claude Haiku model streams the text, the gateway meters it at about 4 characters per token, and the model's own token count appears under the answer when it finishes. You pay in 50-token blocks at $2 per million tokens.</p></details>
       <details><summary>Can I run it myself?</summary><p>Yes. The code is on GitHub with setup steps in the README: a Node server, a devnet mint you control, and an Anthropic API key.</p></details>
     </div>
   </div>
@@ -254,7 +258,7 @@ async function start() {
     S = await post('/api/open/confirm', { id: o.id, signature: signMessage(o.message) });
     $('answer').innerHTML = '<span class="t-small">Session open. This tab made its own wallet, which now holds $0.50 of ' + (S.realUsdc ? 'Circle devnet USDC' : 'test USDC') + '. The tab approved the Tollgate program to spend at most $0.25 of it, and only against vouchers the tab signs. Ask something.</span>';
     $('links').innerHTML = ex(S.openSig, 'Open: fund $0.50 + approve the program for $0.25 ↗');
-    ['q', 'send', 'over', 'settle', 'guided'].forEach(i => $(i).disabled = false);
+    ['q', 'send', 'over', 'settle', 'guided', 'agentBtn'].forEach(i => $(i).disabled = false);
   } catch (e) {
     $('answer').innerHTML = `<span class="bad">Could not open a session: ${e.message}. Devnet may be busy; reload to try again.</span>`;
   }
@@ -277,6 +281,15 @@ $('ask').addEventListener('submit', e => {
   });
   es.addEventListener('pay', async ev => {
     const d = JSON.parse(ev.data);
+    if (agent && !agent.stopped && vouchers >= 1) {
+      const r = await post('/api/agent/decide', { id: S.id, task: agent.task, text: ($('out') || {}).textContent || '' });
+      $('agentlog').insertAdjacentHTML('beforeend', `<div><b>Agent:</b> ${r.enough ? 'stop paying' : 'keep paying'}. ${r.why.replace(/</g, '&lt;')}</div>`);
+      if (r.enough) {
+        agent.stopped = true; $('paying').checked = false; es.close(); $('send').disabled = false;
+        $('answer').insertAdjacentHTML('beforeend', `<div class="wait">The agent stopped paying after ${vouchers * 50} tokens. It had what it needed.</div>`);
+        return;
+      }
+    }
     if ($('paying').checked) await signAndSend(d.cumulativeAmount, d.cumulativeTokens);
     else { pendingAsk = d; if (!document.querySelector('#answer .wait')) $('answer').insertAdjacentHTML('beforeend', '<div class="wait">Waiting for payment. Turn on Keep paying to continue.</div>'); }
   });
@@ -303,7 +316,7 @@ $('settle').addEventListener('click', async () => {
     const st = r.settled;
     $('result').innerHTML = `<b>Paid ${usd(st.paid)} for ${r.paidTokens} tokens · ${usd(st.refunded)} never left your wallet.</b><div class="t-small">The Tollgate program checked your signed voucher on-chain. Settled in ${(st.ms / 1000).toFixed(1)} s. The provider's permission to pull was revoked in the same transaction.</div>`;
     $('links').insertAdjacentHTML('beforeend', ex(st.sig, 'Settle: voucher checked on-chain, paid + revoked ↗', 'ok'));
-    ['q', 'send', 'over', 'guided'].forEach(i => $(i).disabled = true);
+    ['q', 'send', 'over', 'guided', 'agentBtn'].forEach(i => $(i).disabled = true);
   } catch (e) { $('result').innerHTML = `<span class="bad">${e.message}</span>`; $('settle').disabled = false; }
 });
 fetch('/api/stats').then(r => r.json()).then(s => {
@@ -314,6 +327,25 @@ fetch('/api/stats').then(r => r.json()).then(s => {
 
 // Guided run: ask, stop paying for a few seconds, resume, overcharge, settle.
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+let agent = null;
+// Agent mode: this tab's wallet belongs to a buying agent. Before each next voucher it reads the
+// answer so far and decides whether to keep paying; then it settles on its own.
+$('agentBtn').addEventListener('click', async () => {
+  $('agentBtn').disabled = true; $('guided').disabled = true;
+  agent = { task: 'Learn what a payment channel is. One clear sentence is enough.' };
+  $('agentlog').hidden = false;
+  $('agentlog').innerHTML = `<div><b>Agent task:</b> ${agent.task}</div>`;
+  say('An AI agent is paying for this answer, 50 tokens at a time.');
+  $('q').value = 'Explain how a payment channel works, from opening to closing, in about 300 words.';
+  $('ask').requestSubmit();
+  while (!agent.stopped && !$('send').disabled) await sleep(100);
+  while (!agent.stopped && $('send').disabled) await sleep(200);
+  await sleep(1500);
+  say('The agent settles: it pays only for what it chose to buy.');
+  $('settle').click();
+  while (!/Paid/.test($('result').innerHTML)) await sleep(200);
+  say(`Done. The agent bought ${vouchers * 50} tokens and kept the rest of the money.`);
+});
 const say = t => { $('step').textContent = t; };
 $('guided').addEventListener('click', async () => {
   $('guided').disabled = true;
