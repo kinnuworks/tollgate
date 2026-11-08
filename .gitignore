@@ -1,0 +1,14 @@
+CLAUDE.md
+HACKATHON.md
+STATE.md
+judge.sh
+stranger.sh
+judging/
+SETUP.md
+gitignore-add.txt
+node_modules/
+app/node_modules/
+app/keys/
+.env
+app/.env
+*.log
