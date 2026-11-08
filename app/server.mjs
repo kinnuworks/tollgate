@@ -100,12 +100,12 @@ app.get('/api/chat', async (req, res) => {
     const allowedChars = s.paidTokens * CHARS_PER_TOKEN;
     const available = buffer.length;
     if (sentChars < available && sentChars < allowedChars) {
-      const chunk = buffer.slice(sentChars, Math.min(available, allowedChars, sentChars + 24));
+      const chunk = buffer.slice(sentChars, Math.min(available, allowedChars, sentChars + 8));
       sentChars += chunk.length;
       answer += chunk;
       s.tokens = Math.ceil(sentChars / CHARS_PER_TOKEN) + (s.tokensBefore || 0);
       send('text', { chunk, tokens: s.tokens });
-      await new Promise(r => setTimeout(r, 18));
+      await new Promise(r => setTimeout(r, 30));
       continue;
     }
     if (done && sentChars >= available) break;
