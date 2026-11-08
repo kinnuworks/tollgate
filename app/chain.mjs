@@ -124,8 +124,8 @@ const ED25519_PROGRAM = address('Ed25519SigVerify111111111111111111111111111');
 const INSTRUCTIONS_SYSVAR = address('Sysvar1nstructions1111111111111111111111111');
 // Providers selling through Tollgate. Each has its own delegate PDA, derived from its wallet.
 export const PROVIDERS = {
-  haiku: { id: 'haiku', name: 'Claude Haiku', model: 'claude-haiku-5-5', unitsPerToken: 2n, wallet: address(process.env.PROVIDER_HAIKU || 'HBKvsWpsZHdqrwstePVRiKttFjoW3AEaEYNvCezMaFtp') },
-  sonnet: { id: 'sonnet', name: 'Claude Sonnet', model: 'claude-sonnet-5-5', unitsPerToken: 6n, wallet: address(process.env.PROVIDER_SONNET || 'CKr6qxg1kFwPNDprnqwYH6Dibk4CTvqSqG1zU2eBofeY') },
+  haiku: { id: 'haiku', name: 'Claude Haiku', model: 'claude-haiku-5-5', thinking: { type: 'disabled' }, unitsPerToken: 2n, wallet: address(process.env.PROVIDER_HAIKU || 'HBKvsWpsZHdqrwstePVRiKttFjoW3AEaEYNvCezMaFtp') },
+  sonnet: { id: 'sonnet', name: 'Claude Sonnet', model: 'claude-sonnet-5-5', thinking: { type: 'between_tools' }, unitsPerToken: 6n, wallet: address(process.env.PROVIDER_SONNET || 'CKr6qxg1kFwPNDprnqwYH6Dibk4CTvqSqG1zU2eBofeY') },
 };
 const pdaCache = new Map();
 export async function pdaFor(wallet) {
