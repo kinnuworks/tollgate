@@ -14,7 +14,7 @@ import bs58 from 'bs58';
 import Anthropic from '@anthropic-ai/sdk';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { encodeVoucherMessageBytes } from '@solana/mpp/server';
-import { openSession, settle, tryOvercharge, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
+import { prepareOpen, prepareSettle, submitWithPayerSignature, tryOvercharge, stats, DEPOSIT, FUNDING, MINT } from './chain.mjs';
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.MODEL || 'claude-haiku-5-5';
@@ -38,11 +38,11 @@ app.post('/api/open', async (req, res) => {
   try {
     const sessionKey = String(req.body.sessionKey || '');
     if (bs58.decode(sessionKey).length !== 32) throw new Error('bad session key');
-    const o = await openSession();
     const id = crypto.randomUUID();
-    const s = { id, sessionKey, ...o, paidAmount: 0n, paidTokens: 0, tokens: 0, vouchers: [], waiters: [], history: [] };
+    const { tx, message } = await prepareOpen(sessionKey);
+    const s = { id, sessionKey, payerAddress: sessionKey, payee: null, paidAmount: 0n, paidTokens: 0, tokens: 0, vouchers: [], waiters: [], history: [], pending: tx };
     sessions.set(id, s);
-    res.json(pub(s));
+    res.json({ id, message });
   } catch (e) {
     console.error('open', e);
     res.status(500).json({ error: String(e.message || e) });
@@ -126,10 +126,24 @@ app.get('/api/chat', async (req, res) => {
   res.end();
 });
 
+// The tab signs the transaction message with its own key; the server adds nothing but fees.
+app.post('/api/open/confirm', async (req, res) => {
+  const s = sessions.get(req.body.id);
+  if (!s || !s.pending) return res.status(404).json({ error: 'no pending open' });
+  try {
+    const r = await submitWithPayerSignature(s.pending, s.payerAddress, bs58.decode(req.body.signature));
+    s.pending = null; s.openSig = r.sig; s.openMs = r.ms; s.payee = (await stats()).payee || s.payee;
+    res.json(pub(s));
+  } catch (e) {
+    console.error('open/confirm', e);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 app.post('/api/overcharge', async (req, res) => {
   const s = sessions.get(req.body.id);
   if (!s) return res.status(404).json({ error: 'no session' });
-  try { res.json(await tryOvercharge(s.payer)); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  try { res.json(await tryOvercharge(s.payerAddress)); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 
 app.post('/api/settle', async (req, res) => {
@@ -137,7 +151,12 @@ app.post('/api/settle', async (req, res) => {
   if (!s) return res.status(404).json({ error: 'no session' });
   if (s.settled) return res.json(pub(s));
   try {
-    const r = await settle(s.payer, s.paidAmount);
+    if (!req.body.signature) {
+      const { tx, message } = await prepareSettle(s.payerAddress, s.paidAmount);
+      s.pendingSettle = tx;
+      return res.json({ message, amount: s.paidAmount.toString() });
+    }
+    const r = await submitWithPayerSignature(s.pendingSettle, s.payerAddress, bs58.decode(req.body.signature));
     s.settled = { sig: r.sig, ms: r.ms, paid: s.paidAmount.toString(), refunded: (FUNDING - s.paidAmount).toString() };
     res.json(pub(s));
   } catch (e) {

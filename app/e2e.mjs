@@ -9,7 +9,7 @@ const priv = ed25519.utils.randomSecretKey();
 const sessionKey = bs58.encode(ed25519.getPublicKey(priv));
 const post = async (p, b) => { const r = await fetch(BASE + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }); const j = await r.json(); if (!r.ok) throw new Error(p + ' ' + JSON.stringify(j)); return j; };
 
-const s = await post('/api/open', { sessionKey });
+const o = await post('/api/open', { sessionKey }); const sign = m => bs58.encode(ed25519.sign(Uint8Array.from(Buffer.from(m, 'base64')), priv)); const s = await post('/api/open/confirm', { id: o.id, signature: sign(o.message) });
 console.log('open ok', s.openSig.slice(0, 12));
 let vouchers = 0, paused = false, pausedAt = null, text = '';
 async function pay(d) {
@@ -38,5 +38,5 @@ for (;;) {
 }
 console.log('answer start:', JSON.stringify(text.slice(0, 120)));
 console.log('overcharge', await post('/api/overcharge', { id: s.id }));
-const st = await post('/api/settle', { id: s.id });
+const p = await post('/api/settle', { id: s.id }); const st = await post('/api/settle', { id: s.id, signature: sign(p.message) });
 console.log('settle', st.settled, 'vouchers', vouchers);

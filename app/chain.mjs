@@ -10,6 +10,7 @@ import {
   pipe, createTransactionMessage, setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash, appendTransactionMessageInstructions,
   signTransactionMessageWithSigners, getBase64EncodedWireTransaction, getSignatureFromTransaction,
+  createNoopSigner, partiallySignTransactionMessageWithSigners, getBase64Decoder,
 } from '@solana/kit';
 import {
   findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync,
@@ -80,17 +81,52 @@ async function send(feePayer, ixs, { skipPreflight = false } = {}) {
 }
 async function timed(fn) { const t = Date.now(); await fn(); return Date.now() - t; }
 
-export async function openSession() {
+// The browser tab owns the payer wallet: its key signs the approval here and the
+// revoke at settle. The server only pays fees and mints test USDC into it.
+async function prepare(ixs) {
+  const operator = await operatorP;
+  const { value: bh } = await retry(() => rpc.getLatestBlockhash({ commitment: 'confirmed' }).send());
+  const msg = pipe(
+    createTransactionMessage({ version: 0 }),
+    m => setTransactionMessageFeePayerSigner(operator, m),
+    m => setTransactionMessageLifetimeUsingBlockhash(bh, m),
+    m => appendTransactionMessageInstructions(ixs, m),
+  );
+  const tx = await partiallySignTransactionMessageWithSigners(msg);
+  return { tx, message: getBase64Decoder().decode(tx.messageBytes) };
+}
+
+export async function submitWithPayerSignature(tx, payerAddress, signatureBytes) {
+  const signed = { ...tx, signatures: { ...tx.signatures, [payerAddress]: signatureBytes } };
+  const sig = getSignatureFromTransaction(signed);
+  await retry(() => rpc.sendTransaction(getBase64EncodedWireTransaction(signed), { encoding: 'base64', preflightCommitment: 'confirmed' }).send());
+  return { sig, ms: await timed(() => confirm(sig)) };
+}
+
+export async function prepareOpen(payerAddress) {
   const operator = await operatorP;
   const payee = await payeeP;
-  const payer = await generateKeyPairSigner();
-  const payerAta = await ata(payer.address);
-  const { sig, ms } = await send(operator, [
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: payer.address, mint: MINT }),
+  const owner = createNoopSigner(address(payerAddress));
+  const payerAta = await ata(owner.address);
+  return prepare([
+    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: operator, owner: owner.address, mint: MINT }),
     getMintToInstruction({ mint: MINT, token: payerAta, mintAuthority: operator, amount: FUNDING }),
-    getApproveInstruction({ source: payerAta, delegate: payee.address, owner: payer, amount: DEPOSIT }),
+    getApproveInstruction({ source: payerAta, delegate: payee.address, owner, amount: DEPOSIT }),
   ]);
-  return { payer, payerAddress: payer.address, payee: payee.address, openSig: sig, openMs: ms };
+}
+
+export async function prepareSettle(payerAddress, amount) {
+  const payee = await payeeP;
+  const owner = createNoopSigner(address(payerAddress));
+  const { ix, payeeAta } = await ensurePayeeAta();
+  const ixs = [ix];
+  if (amount > 0n) {
+    ixs.push(getTransferCheckedInstruction({
+      source: await ata(owner.address), mint: MINT, destination: payeeAta, authority: payee, amount, decimals: DECIMALS,
+    }));
+  }
+  ixs.push(getRevokeInstruction({ source: await ata(owner.address), owner }));
+  return prepare(ixs);
 }
 
 async function ensurePayeeAta() {
@@ -100,14 +136,14 @@ async function ensurePayeeAta() {
 }
 
 // The provider tries to pull more than the on-chain cap. The token program refuses.
-export async function tryOvercharge(payer) {
+export async function tryOvercharge(payerAddress) {
   const operator = await operatorP;
   const payee = await payeeP;
   const { ix, payeeAta } = await ensurePayeeAta();
   const amount = DEPOSIT + 50_000n;
   try {
     const r = await send(operator, [ix, getTransferCheckedInstruction({
-      source: await ata(payer.address), mint: MINT, destination: payeeAta, authority: payee, amount, decimals: DECIMALS,
+      source: await ata(address(payerAddress)), mint: MINT, destination: payeeAta, authority: payee, amount, decimals: DECIMALS,
     })], { skipPreflight: true });
     return { sig: r.sig, failed: false, amount: amount.toString() };
   } catch (e) {
@@ -116,19 +152,6 @@ export async function tryOvercharge(payer) {
   }
 }
 
-export async function settle(payer, amount) {
-  const operator = await operatorP;
-  const payee = await payeeP;
-  const { ix, payeeAta } = await ensurePayeeAta();
-  const ixs = [ix];
-  if (amount > 0n) {
-    ixs.push(getTransferCheckedInstruction({
-      source: await ata(payer.address), mint: MINT, destination: payeeAta, authority: payee, amount, decimals: DECIMALS,
-    }));
-  }
-  ixs.push(getRevokeInstruction({ source: await ata(payer.address), owner: payer }));
-  return send(operator, ixs);
-}
 
 // Public proof of use: successful payouts into the provider's token account.
 let statsCache = { at: 0, value: null };
@@ -138,7 +161,7 @@ export async function stats() {
   const payeeAccount = await ata(payee.address);
   const sigs = await retry(() => rpc.getSignaturesForAddress(payeeAccount, { limit: 1000 }).send());
   const ok = sigs.filter(s => !s.err);
-  const value = { settledSessions: ok.length, refusedOvercharges: sigs.length - ok.length, payeeAccount };
+  const value = { settledSessions: ok.length, refusedOvercharges: sigs.length - ok.length, payeeAccount, payee: payee.address };
   statsCache = { at: Date.now(), value };
   return value;
 }

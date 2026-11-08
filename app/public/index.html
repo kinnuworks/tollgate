@@ -52,7 +52,7 @@
       <div class="meter" id="cost">$0.000000</div>
       <div class="muted" id="tokens">0 tokens paid · 0 vouchers</div>
     </div><div class="muted" style="text-align:right">Deposit cap<br><b id="cap">$0.25</b></div></div>
-    <div class="muted" style="margin-top:8px">Price: $2 per million tokens. Test USDC on devnet; this tab made its own signing key.</div>
+    <div class="muted" style="margin-top:8px">Price: $2 per million tokens. Test USDC on devnet. The wallet's key lives only in this tab.</div>
     <div id="vouchers"></div>
     <div class="actions">
       <button id="over" disabled>Provider tries to take $0.30</button>
@@ -87,6 +87,8 @@ const $ = id => document.getElementById(id);
 const usd = units => '$' + (Number(units) / 1e6).toFixed(6);
 const ex = (sig, label, cls='') => `<a class="${cls}" target="_blank" rel="noopener" href="https://explorer.solana.com/tx/${sig}?cluster=devnet">${label}</a>`;
 const kp = nacl.sign.keyPair();
+// This tab's key owns the wallet: it signs the on-chain approval, the vouchers and the revoke.
+const signMessage = b64 => b58enc(nacl.sign.detached(Uint8Array.from(atob(b64), c => c.charCodeAt(0)), kp.secretKey));
 const sessionKey = b58enc(kp.publicKey);
 let S = null, pendingAsk = null, vouchers = 0;
 
@@ -107,8 +109,9 @@ async function signAndSend(cumulativeAmount, cumulativeTokens) {
 
 async function start() {
   try {
-    S = await post('/api/open', { sessionKey });
-    $('answer').innerHTML = '<span class="muted">Session open. A fresh wallet holds $0.50 of test USDC, and the provider is approved on-chain to take at most $0.25 of it. Ask something.</span>';
+    const o = await post('/api/open', { sessionKey });
+    S = await post('/api/open/confirm', { id: o.id, signature: signMessage(o.message) });
+    $('answer').innerHTML = '<span class="muted">Session open. This tab made its own wallet, which now holds $0.50 of test USDC. The tab signed an on-chain approval letting the provider take at most $0.25 of it. Ask something.</span>';
     $('links').innerHTML = ex(S.openSig, 'Open: fund $0.50 + approve a $0.25 cap ↗');
     ['q', 'send', 'over', 'settle', 'guided'].forEach(i => $(i).disabled = false);
   } catch (e) {
@@ -153,7 +156,8 @@ $('over').addEventListener('click', async () => {
 $('settle').addEventListener('click', async () => {
   $('settle').disabled = true; $('result').innerHTML = '<span class="muted">Settling on Solana…</span>';
   try {
-    const r = await post('/api/settle', { id: S.id });
+    const p = await post('/api/settle', { id: S.id });
+    const r = await post('/api/settle', { id: S.id, signature: signMessage(p.message) });
     const st = r.settled;
     $('result').innerHTML = `<b>Paid ${usd(st.paid)} for ${r.paidTokens} tokens · ${usd(st.refunded)} never left your wallet.</b><div class="muted">Settled in ${(st.ms / 1000).toFixed(1)} s. The provider's permission to pull was revoked in the same transaction.</div>`;
     $('links').insertAdjacentHTML('beforeend', ex(st.sig, 'Settle: pull the signed amount + revoke ↗', 'ok'));

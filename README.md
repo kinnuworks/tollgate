@@ -21,12 +21,12 @@ Open the link and press **Run the 60-second demo**. It does the steps below on i
 ```
 browser tab                         gateway (Node)                      Solana devnet
 -----------                         --------------                      -------------
-makes its own ed25519 key  ───────► open: fund payer with test USDC ──► mint + approve(provider, cap $0.25)
+makes its own wallet key   ───────► open: tab signs approve          ──► mint $0.50 + approve(provider, cap $0.25)
                                     stream AI answer, 50 tokens
 ◄── "pay up to N tokens"            at a time; waits for a voucher
 signs voucher (amount, expiry) ───► checks the signature against the
                                     tab's key, releases the next block
-                                    settle: pull the signed total  ───► transferChecked + revoke, one tx
+                                    settle: tab signs revoke        ───► transferChecked + revoke, one tx
 ```
 
 - **Vouchers.** Each voucher is the 50-byte format used by the Solana Foundation's payment channels (`0x56 0x01 · channel id · cumulative amount u64 · expiry i64`), signed with the tab's own ed25519 key. The gateway won't stream past what the latest voucher covers.
@@ -37,7 +37,7 @@ signs voucher (amount, expiry) ───► checks the signature against the
 ## What is real and what isn't
 
 - Every transaction is real and on Solana devnet. The USDC is a test token this project minted on devnet ("test USDC", 6 decimals). It is not Circle's USDC.
-- In the demo, the server funds the payer wallet and holds its key so you don't need a wallet. The voucher key is generated in your browser tab and never leaves it.
+- Your browser tab makes its own wallet. Its key never leaves the tab, and it signs the on-chain approval, every voucher and the revoke at settle. The server only pays network fees and mints test USDC into the wallet, so you don't need a wallet extension.
 - The token count during streaming is an estimate (about 4 characters per token). The model's own count is shown under the answer when it ends. You pay in 50-token blocks.
 - The voucher limit is enforced by the gateway. The chain enforces the $0.25 cap (the demo wallet holds $0.50, so the refused $0.30 pull fails because of the cap, not the balance) and the final transfer. A dishonest provider could pull up to the cap, not more.
 - Settling against a signed voucher on-chain is the job of the Solana Foundation's payment-channels program. We opened a channel on it on devnet with this same voucher format ([open transaction](https://explorer.solana.com/tx/5NtC5ZKkgZqm4gMSPJFh9cGHACmUeKDLKiKuW2NJ1qaReur1KZ3EDREZktxcV1MGcz6KNx2AmGS39nsr3QSrzhgx?cluster=devnet)). Its settle-and-payout transaction failed on devnet's treasury account check (`TreasuryAccountMismatch`), so the demo moves money with SPL token delegation instead.
