@@ -50,6 +50,16 @@ signs voucher (amount, expiry) ───► checks the signature, releases
 - We first tried the Solana Foundation's payment-channels program on devnet and opened a channel on it ([open transaction](https://explorer.solana.com/tx/5NtC5ZKkgZqm4gMSPJFh9cGHACmUeKDLKiKuW2NJ1qaReur1KZ3EDREZktxcV1MGcz6KNx2AmGS39nsr3QSrzhgx?cluster=devnet)). Its payout step failed on devnet's treasury account check (`TreasuryAccountMismatch`), so we wrote the small settle program above instead, keeping the same voucher format.
 - One provider (this project) and one model (Anthropic's Claude Haiku).
 
+## Tests
+
+`node app/e2e.mjs <server url>` runs a full session against a live server on devnet. It opens a wallet, streams an answer while signing vouchers, stops paying for 3 seconds, and resumes. It then checks three things:
+
+- the text held while no voucher was signed
+- a $0.30 settle co-signed by the tab fails at the Tollgate program with error 1
+- the real settle pays exactly the last signed amount
+
+All three pass against the live site.
+
 ## Run it locally
 
 ```bash

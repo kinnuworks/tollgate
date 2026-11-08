@@ -37,6 +37,12 @@ for (;;) {
   }
 }
 console.log('answer start:', JSON.stringify(text.slice(0, 120)));
-const po = await post('/api/overcharge', { id: s.id }); console.log('overcharge', await post('/api/overcharge', { id: s.id, signature: sign(po.message) }));
+const po = await post('/api/overcharge', { id: s.id });
+const oc = await post('/api/overcharge', { id: s.id, signature: sign(po.message) });
+console.log('overcharge', oc);
+const check = (ok, what) => { console.log(ok ? 'PASS' : 'FAIL', what); if (!ok) process.exitCode = 1; };
+check(oc.failed && /"Custom":"?1"?}/.test(oc.error), 'a $0.30 settle co-signed by the tab is refused by the Tollgate program with error 1 (above signed voucher)');
 const p = await post('/api/settle', { id: s.id }); const st = await post('/api/settle', { id: s.id, signature: sign(p.message) });
 console.log('settle', st.settled, 'vouchers', vouchers);
+check(st.settled && st.settled.paid === st.paidAmount, 'settle pays exactly the last signed voucher amount');
+check(paused && true, 'the stream held while no voucher was signed');
