@@ -129,4 +129,17 @@ export async function settle(payer, amount) {
   return send(operator, ixs);
 }
 
+// Public proof of use: successful payouts into the provider's token account.
+let statsCache = { at: 0, value: null };
+export async function stats() {
+  if (statsCache.value && Date.now() - statsCache.at < 20_000) return statsCache.value;
+  const payee = await payeeP;
+  const payeeAccount = await ata(payee.address);
+  const sigs = await retry(() => rpc.getSignaturesForAddress(payeeAccount, { limit: 1000 }).send());
+  const ok = sigs.filter(s => !s.err);
+  const value = { settledSessions: ok.length, refusedOvercharges: sigs.length - ok.length, payeeAccount };
+  statsCache = { at: Date.now(), value };
+  return value;
+}
+
 export { rpc };

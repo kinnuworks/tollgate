@@ -35,6 +35,8 @@
 <header>
   <h1>Tollgate</h1>
   <p>Pay for AI by the token in USDC on Solana. Stop paying and the answer stops. Whatever you don't use stays yours.</p>
+  <p class="muted" id="stats"></p>
+  <div style="margin-top:10px"><button class="primary" id="guided" disabled>Run the 60-second demo</button> <span class="muted" id="step"></span></div>
 </header>
 <main>
   <section>
@@ -108,7 +110,7 @@ async function start() {
     S = await post('/api/open', { sessionKey });
     $('answer').innerHTML = '<span class="muted">Session open. $0.25 of test USDC is in a fresh wallet, and the provider is approved on-chain to take at most that. Ask something.</span>';
     $('links').innerHTML = ex(S.openSig, 'Open: fund + approve the $0.25 cap ↗');
-    ['q', 'send', 'over', 'settle'].forEach(i => $(i).disabled = false);
+    ['q', 'send', 'over', 'settle', 'guided'].forEach(i => $(i).disabled = false);
   } catch (e) {
     $('answer').innerHTML = `<span class="bad">Could not open a session: ${e.message}. Devnet may be busy; reload to try again.</span>`;
   }
@@ -155,8 +157,36 @@ $('settle').addEventListener('click', async () => {
     const st = r.settled;
     $('result').innerHTML = `<b>Paid ${usd(st.paid)} for ${r.paidTokens} tokens · ${usd(st.refunded)} never left your wallet.</b><div class="muted">Settled in ${(st.ms / 1000).toFixed(1)} s. The provider's permission to pull was revoked in the same transaction.</div>`;
     $('links').insertAdjacentHTML('beforeend', ex(st.sig, 'Settle: pull the signed amount + revoke ↗', 'ok'));
-    ['q', 'send', 'over'].forEach(i => $(i).disabled = true);
+    ['q', 'send', 'over', 'guided'].forEach(i => $(i).disabled = true);
   } catch (e) { $('result').innerHTML = `<span class="bad">${e.message}</span>`; $('settle').disabled = false; }
+});
+fetch('/api/stats').then(r => r.json()).then(s => {
+  if (s.settledSessions != null) $('stats').innerHTML = `${s.settledSessions} sessions settled on devnet so far · ${s.refusedOvercharges} overcharges refused · <a target="_blank" rel="noopener" href="https://explorer.solana.com/address/${s.payeeAccount}?cluster=devnet">provider's account ↗</a>`;
+}).catch(() => {});
+
+// Guided run: ask, stop paying for a few seconds, resume, overcharge, settle.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const say = t => { $('step').textContent = t; };
+$('guided').addEventListener('click', async () => {
+  $('guided').disabled = true;
+  say('1/4 · Asking. Watch the vouchers on the right.');
+  $('ask').requestSubmit();
+  while (vouchers < 3) await sleep(150);
+  $('paying').checked = false; $('paying').dispatchEvent(new Event('change'));
+  say('2/4 · Payment stopped. The answer is waiting for a voucher…');
+  await sleep(4000);
+  $('paying').checked = true; $('paying').dispatchEvent(new Event('change'));
+  say('2/4 · Paying again. The answer carries on.');
+  while ($('send').disabled) await sleep(200);
+  await sleep(1500);
+  say('3/4 · The provider tries to take $0.30, above the $0.25 it was approved for…');
+  $('over').click();
+  while (!/Refused|Unexpected|bad/.test($('result').innerHTML)) await sleep(200);
+  await sleep(2500);
+  say('4/4 · Settling: pay exactly what was signed, revoke the rest.');
+  $('settle').click();
+  while (!/Paid/.test($('result').innerHTML)) await sleep(200);
+  say('Done. Every step above has an explorer link.');
 });
 start();
 </script>

@@ -14,7 +14,7 @@ import bs58 from 'bs58';
 import Anthropic from '@anthropic-ai/sdk';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { encodeVoucherMessageBytes } from '@solana/mpp/server';
-import { openSession, settle, tryOvercharge, DEPOSIT, MINT } from './chain.mjs';
+import { openSession, settle, tryOvercharge, stats, DEPOSIT, MINT } from './chain.mjs';
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.MODEL || 'claude-haiku-5-5';
@@ -146,5 +146,8 @@ app.post('/api/settle', async (req, res) => {
   }
 });
 
+app.get('/api/stats', async (_, res) => {
+  try { res.json(await stats()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
 app.get('/api/health', (_, res) => res.json({ ok: true, model: MODEL, hasKey: !!process.env.ANTHROPIC_API_KEY }));
 app.listen(PORT, () => console.log(`tollgate on :${PORT}`));
