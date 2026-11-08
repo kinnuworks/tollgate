@@ -12,3 +12,5 @@ app/keys/
 .env
 app/.env
 *.log
+SUBMISSION.md
+VIDEO.md
